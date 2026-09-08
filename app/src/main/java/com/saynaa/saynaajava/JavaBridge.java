@@ -152,7 +152,8 @@ public class JavaBridge {
       }
 
       return (paramType == int.class || paramType == long.class || paramType == short.class
-                 || paramType == byte.class || paramType == float.class || paramType == double.class)
+                 || paramType == byte.class || paramType == float.class || paramType == double.class
+                 || paramType == char.class)
           && Number.class.isAssignableFrom(argType);
     }
 
@@ -188,6 +189,16 @@ public class JavaBridge {
       return arg instanceof Number ? ((Number) arg).shortValue() : arg;
     if (paramType == byte.class || paramType == Byte.class)
       return arg instanceof Number ? ((Number) arg).byteValue() : arg;
+    if (paramType == char.class || paramType == Character.class) {
+      if (arg instanceof Character)
+        return arg;
+      if (arg instanceof Number)
+        return (char) ((Number) arg).intValue();
+      if (arg instanceof CharSequence) {
+        CharSequence str = (CharSequence) arg;
+        return str.length() > 0 ? str.charAt(0) : '\0';
+      }
+    }
 
     return arg;
   }
@@ -254,6 +265,8 @@ public class JavaBridge {
   }
 
   public static void logMethodMismatch(Class<?> cls, String methodName, Object[] args) {
+    if (!Log.isLoggable(TAG, Log.ERROR))
+      return;
     StringBuilder sb = new StringBuilder();
     sb.append("No matching method found: ").append(cls.getName()).append(".").append(methodName).append("(");
     if (args != null) {
@@ -416,7 +429,7 @@ public class JavaBridge {
       Class<?> component = cls.getComponentType();
       Object arrayObj = Array.newInstance(component, list.size());
       for (int i = 0; i < list.size(); i++) {
-        Array.set(arrayObj, i, list.get(i));
+        Array.set(arrayObj, i, coerceArg(component, list.get(i)));
       }
       created = arrayObj;
     } else if (List.class.isAssignableFrom(cls)) {
@@ -453,6 +466,8 @@ public class JavaBridge {
   }
 
   private static void logConstructorMismatch(Class<?> cls, Object[] args) {
+    if (!Log.isLoggable(TAG, Log.ERROR))
+      return;
     StringBuilder sb = new StringBuilder();
     sb.append("Constructor mismatch for ").append(cls.getName()).append(". Args=");
     if (args == null) {
@@ -586,12 +601,18 @@ public class JavaBridge {
     int argc = safeArgs == null ? 0 : safeArgs.length;
     int argStart = saynaa.allocSlot(argc + 4);
 
-    for (int i = 0; i < argc; i++) {
-      int slot = argStart + i;
-      if (!pushToSlot(saynaa, slot, safeArgs[i])) {
-        saynaa.freeSlot(argStart, argc + 4);
-        return null;
+    try {
+      for (int i = 0; i < argc; i++) {
+        int slot = argStart + i;
+        if (!pushToSlot(saynaa, slot, safeArgs[i])) {
+          saynaa.freeSlot(argStart, argc + 4);
+          return null;
+        }
       }
+    } catch (Exception e) {
+      saynaa.freeSlot(argStart, argc + 4);
+      Log.e(TAG, "Failed pushing args for callback: " + methodName, e);
+      return null;
     }
 
     return saynaa.invokeCallbackMethodWithResultFromSlots(callbackId, methodName, argStart, argc);
@@ -659,34 +680,40 @@ public class JavaBridge {
     return ReflectionNormalizer.defaultReturnFor(returnType);
   }
 
+  private static Class<?>[] parseInterfaces(String interfaceName) {
+    if (interfaceName == null || interfaceName.trim().isEmpty()) {
+      return null;
+    }
+
+    String[] names = interfaceName.split(",");
+    Class<?>[] ifaces = new Class<?>[names.length];
+
+    for (int i = 0; i < names.length; i++) {
+      String n = names[i] == null ? "" : names[i].trim();
+      if (n.isEmpty()) {
+        return null;
+      }
+      Class<?> iface = ReflectionFinder.findClass(n);
+      if (iface == null) {
+        return null;
+      }
+      ifaces[i] = iface;
+    }
+    return ifaces;
+  }
+
   public static Object createNativeCallbackProxy(final Saynaa saynaa, final String interfaceName,
       final String methodName, final int callbackId) {
     try {
-      if (interfaceName == null || interfaceName.trim().isEmpty()) {
-        Log.e(TAG, "createNativeCallbackProxy failed: empty interfaceName");
+      Class<?>[] ifaces = parseInterfaces(interfaceName);
+      if (ifaces == null || ifaces.length == 0) {
+        Log.e(TAG, "createNativeCallbackProxy failed: invalid interface(s) " + interfaceName);
         return null;
       }
 
-      String[] names = interfaceName.split(",");
-      Class<?>[] ifaces = new Class<?>[names.length];
-      ClassLoader loader = null;
-      for (int i = 0; i < names.length; i++) {
-        String n = names[i] == null ? "" : names[i].trim();
-        if (n.isEmpty()) {
-          Log.e(TAG, "createNativeCallbackProxy failed: invalid interface list: " + interfaceName);
-          return null;
-        }
-        Class<?> iface = ReflectionFinder.findClass(n);
-        if (iface == null) {
-          Log.e(TAG, "createNativeCallbackProxy failed: class not found: " + n);
-          return null;
-        }
-        ifaces[i] = iface;
-        if (loader == null)
-          loader = iface.getClassLoader();
-      }
-
+      ClassLoader loader = ifaces[0].getClassLoader();
       final boolean wildcard = "*".equals(methodName);
+
       InvocationHandler handler = (proxy, method, args) -> {
         String m = method.getName();
         if ("toString".equals(m) && method.getParameterTypes().length == 0)
@@ -721,17 +748,12 @@ public class JavaBridge {
 
   public static String getDefaultInterfaceMethodName(String interfaceName) {
     try {
-      if (interfaceName == null || interfaceName.trim().isEmpty())
-        return "*";
-
-      String[] names = interfaceName.split(",");
-      if (names.length != 1) {
+      Class<?>[] ifaces = parseInterfaces(interfaceName);
+      if (ifaces == null || ifaces.length != 1) {
         return "*";
       }
 
-      Class<?> iface = ReflectionFinder.findClass(names[0].trim());
-      if (iface == null)
-        return "*";
+      Class<?> iface = ifaces[0];
       Method[] methods = iface.getMethods();
       String found = null;
       for (Method m : methods) {
