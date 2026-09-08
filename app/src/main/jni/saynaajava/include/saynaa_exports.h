@@ -45,3 +45,24 @@ JNIEXPORT jint JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1getMapSize(
     JNIEnv* env, jobject thiz, jint mapSlot);
 JNIEXPORT void JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1close(JNIEnv* env, jobject thiz);
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved);
+
+
+#define JNI_GET_STRING_FAST(env, jstr, charsPtr, lenVar, isCopyVar, buffer, bufSize) \
+  jsize charCount_##lenVar = (*env)->GetStringLength(env, jstr); \
+  lenVar = (*env)->GetStringUTFLength(env, jstr); \
+  if (lenVar < bufSize) { \
+    (*env)->GetStringUTFRegion(env, jstr, 0, charCount_##lenVar, buffer); \
+    buffer[lenVar] = '\0'; \
+    charsPtr = buffer; \
+    isCopyVar = false; \
+  } else { \
+    charsPtr = (*env)->GetStringUTFChars(env, jstr, NULL); \
+    isCopyVar = true; \
+  }
+
+#define JNI_RELEASE_STRING_FAST(env, jstr, charsPtr, isCopyVar) \
+  if (isCopyVar) { \
+    (*env)->ReleaseStringUTFChars(env, jstr, charsPtr); \
+  }
+
+#define MAX_JNI_STACK_STR 128

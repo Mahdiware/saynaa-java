@@ -140,34 +140,33 @@ JNIEXPORT jobject JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1getGlobal(
   if (vm == NULL || name == NULL)
     return NULL;
 
-  BridgeState* bridge = bridge_from_vm(vm);
-  const char* key = (*env)->GetStringUTFChars(env, name, NULL);
-  if (key == NULL)
-    return NULL;
-  LOGI("saynaa_getGlobal: handleId=%d, name=%s", handleId, key);
-
   Handle* handle = find_pinned_handle(vm, handleId);
-  if (handle == NULL) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
+  if (handle == NULL || !IS_OBJ_TYPE(handle->value, OBJ_MODULE))
     return NULL;
-  }
-  if (!IS_OBJ_TYPE(handle->value, OBJ_MODULE)) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
-    return NULL;
-  }
+
   Module* module = (Module*) AS_OBJ(handle->value);
 
-  int idx = moduleGetGlobalIndex(module, key, (uint32_t) strlen(key));
-  (*env)->ReleaseStringUTFChars(env, name, key);
+  char stackKey[MAX_JNI_STACK_STR];
+  const char* key;
+  jsize keyLen;
+  bool isCopy;
+  JNI_GET_STRING_FAST(env, name, key, keyLen, isCopy, stackKey, sizeof(stackKey));
+
+  int idx = moduleGetGlobalIndex(module, key, (uint32_t) keyLen);
+  JNI_RELEASE_STRING_FAST(env, name, key, isCopy);
+
   if (idx < 0)
     return NULL;
 
+  BridgeState* bridge = bridge_from_vm(vm);
   reserveSlots(vm, 2);
   int slot1 = nextSlot(vm, true);
 
   Handle* handle2 = newHandle(vm, module->context->globals.data[idx]);
-  if (handle2 == NULL)
+  if (handle2 == NULL) {
+    freeSlot(vm, slot1, 1);
     return NULL;
+  }
 
   setSlotHandle(vm, slot1, handle2);
   jobject resultValue = slot_to_java(env, vm, bridge, slot1);
@@ -181,25 +180,21 @@ JNIEXPORT jint JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1getGlobalId(
   if (vm == NULL || name == NULL)
     return (jint) -1;
 
-  BridgeState* bridge = bridge_from_vm(vm);
-  const char* key = (*env)->GetStringUTFChars(env, name, NULL);
-  if (key == NULL)
+  Handle* handle = find_pinned_handle(vm, handleId);
+  if (handle == NULL || !IS_OBJ_TYPE(handle->value, OBJ_MODULE))
     return (jint) -1;
 
-  Handle* handle = find_pinned_handle(vm, handleId);
-  if (handle == NULL) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
-    return (jint) -1;
-  }
-  if (!IS_OBJ_TYPE(handle->value, OBJ_MODULE)) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
-    return (jint) -1;
-  }
   Module* module = (Module*) AS_OBJ(handle->value);
 
-  int idx = moduleGetGlobalIndex(module, key, (uint32_t) strlen(key));
-  (*env)->ReleaseStringUTFChars(env, name, key);
-  find_pinned_handle(vm, handleId);
+  char stackKey[MAX_JNI_STACK_STR];
+  const char* key;
+  jsize keyLen;
+  bool isCopy;
+  JNI_GET_STRING_FAST(env, name, key, keyLen, isCopy, stackKey, sizeof(stackKey));
+
+  int idx = moduleGetGlobalIndex(module, key, (uint32_t) keyLen);
+  JNI_RELEASE_STRING_FAST(env, name, key, isCopy);
+
   return (jint) idx;
 }
 
@@ -209,63 +204,30 @@ JNIEXPORT jint JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1getGlobalFuncti
   if (vm == NULL || name == NULL)
     return (jint) -1;
 
-  BridgeState* bridge = bridge_from_vm(vm);
-  const char* key = (*env)->GetStringUTFChars(env, name, NULL);
-  if (key == NULL)
-    return (jint) -1;
-
   Handle* handle = find_pinned_handle(vm, handleId);
-  if (handle == NULL) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
+  if (handle == NULL || !IS_OBJ_TYPE(handle->value, OBJ_MODULE))
     return (jint) -1;
-  }
-
-  /*
-    08-29 10:56:45.653 45529 45529 F DEBUG   : Cmdline: com.saynaa
-    08-29 10:56:45.653 45529 45529 F DEBUG   : pid: 45529, tid: 45529, name: .android.saynaa  >>> com.saynaa <<<
-    08-29 10:56:45.653 45529 45529 F DEBUG   :       #00 pc 000000000005d7f9 /data/app/~~urhwRxRqISZ--iCP1OBjTQ==/com.saynaa-D81I3IhmIM-iInTzsFK_DQ==/lib/x86_64/libsaynaajava.so (Java_com_saynaa_saynaajava_Saynaa_saynaa_1getGlobalFunctionId+265) (BuildId: 90ffa0777f7b8447a2385d289b021e5ec98541bd)
-    08-29 10:56:45.654 45529 45529 F DEBUG   :       #47 pc 00000000000e1e11 /system/lib64/libandroid_runtime.so (android::AndroidRuntime::start(char const*, android::Vector<android::String8> const&, bool)+897) (BuildId: e21d037b5951e3febdd9cd88307c86ae)
-  */
-
-  LOGI("[TRACE] BEFORE value");
-
-  Var value = handle->value;
-  LOGI("[TRACE] AFTER value");
-  LOGI("[TRACE] BEFORE value is NULL %d, %p", value == NULL, AS_OBJ(value));
-
-  LOGI("ad: handleId=%d, name=%s", handleId, key);
-  LOGI("ad: handle: %p", (void*) handle);
-
-  LOGI("[TRACE] AFTER value %s", varTypeName(value));
-
-  TRACE("getGlobalFunctionId ENTER vm=%p handleId=%d", (void*) vm, handleId);
-
-  if (!IS_OBJ_TYPE(handle->value, OBJ_MODULE)) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
-    return (jint) -1;
-  }
 
   Module* module = (Module*) AS_OBJ(handle->value);
 
-  int idx = moduleGetGlobalIndex(module, key, (uint32_t) strlen(key));
+  char stackKey[MAX_JNI_STACK_STR];
+  const char* key;
+  jsize keyLen;
+  bool isCopy;
+  JNI_GET_STRING_FAST(env, name, key, keyLen, isCopy, stackKey, sizeof(stackKey));
 
-  if (idx == -1) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
-    return (jint) idx;
+  int idx = moduleGetGlobalIndex(module, key, (uint32_t) keyLen);
+  JNI_RELEASE_STRING_FAST(env, name, key, isCopy);
+
+  if (idx == -1)
+    return (jint) -1;
+
+  // Optimize: directly check the raw Var array. No slot allocation needed.
+  Var var = module->context->globals.data[idx];
+  if (!IS_OBJ_TYPE(var, OBJ_CLOSURE)) {
+    return (jint) -1;
   }
 
-  int slot1 = nextSlot(vm, true);
-
-  Var var = module->context->globals.data[idx];
-  vm->fiber->ret[slot1] = var;
-
-  idx = IS_OBJ_TYPE(var, OBJ_CLOSURE) ? idx : -1;
-
-  LOGI("varTypeName: %s, %d", varTypeName(var), idx);
-
-  freeSlot(vm, slot1, 1);
-
-  (*env)->ReleaseStringUTFChars(env, name, key);
   return (jint) idx;
 }
 
@@ -356,33 +318,18 @@ JNIEXPORT jboolean JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1newInstance
 JNIEXPORT jboolean JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1callMethod(JNIEnv* env,
     jobject thiz, jint handleId, jstring methodName, jint argStart, jint argCount, jint retSlot) {
   VM* vm = vm_from_saynaa(env, thiz);
-  if (vm == NULL)
+  if (vm == NULL || methodName == NULL || argStart < 0 || argCount < 0)
     return JNI_FALSE;
-  if (argStart < 0 || argCount < 0)
-    return JNI_FALSE;
-  BridgeState* bridge = bridge_from_vm(vm);
-  if (bridge == NULL)
-    return JNI_FALSE;
-
-  LOGD("saynaa_callMethod: handleId=%d, methodName=%s, argStart=%d, argCount=%d, retSlot=%d", handleId,
-      methodName ? (*env)->GetStringUTFChars(env, methodName, NULL) : "NULL", argStart, argCount, retSlot);
 
   Handle* handle = find_pinned_handle(vm, handleId);
-  if (handle == NULL) {
-    LOGE("saynaa_callMethod: pinned handle not found: id: %d", handleId);
+  if (handle == NULL)
     return JNI_FALSE;
-  }
 
-  if (methodName == NULL) {
-    LOGE("saynaa_callMethod: methodName is NULL");
-    return JNI_FALSE;
-  }
-
-  const char* methodNameChars = (*env)->GetStringUTFChars(env, methodName, NULL);
-  if (methodNameChars == NULL) {
-    LOGE("saynaa_callMethod: methodNameChars is NULL");
-    return JNI_FALSE;
-  }
+  char stackName[MAX_JNI_STACK_STR];
+  const char* methodNameChars;
+  jsize nameLen;
+  bool isCopy;
+  JNI_GET_STRING_FAST(env, methodName, methodNameChars, nameLen, isCopy, stackName, sizeof(stackName));
 
   int needed = argStart + argCount;
   if (retSlot >= needed)
@@ -392,49 +339,44 @@ JNIEXPORT jboolean JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1callMethod(
   reserveSlots(vm, needed);
 
   int slot1 = nextSlot(vm, false);
-
   vm->fiber->ret[slot1] = handle->value;
+
   jboolean ok = CallMethod(vm, slot1, methodNameChars, (int) argCount, (int) argStart, (int) retSlot)
                     ? JNI_TRUE
                     : JNI_FALSE;
 
   freeSlot(vm, slot1, 1);
-  (*env)->ReleaseStringUTFChars(env, methodName, methodNameChars);
+  JNI_RELEASE_STRING_FAST(env, methodName, methodNameChars, isCopy);
   return ok;
 }
+
 JNIEXPORT jobject JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1objGetattr(
     JNIEnv* env, jobject thiz, jint handleId, jstring name, jboolean skipGetter) {
   VM* vm = vm_from_saynaa(env, thiz);
-  LOGD("saynaa_objGetattr called with handleId=%d, name=%s, skipGetter=%d", handleId,
-      name ? (*env)->GetStringUTFChars(env, name, NULL) : "NULL", skipGetter);
   if (vm == NULL || name == NULL)
+    return NULL;
+
+  Handle* handle = find_pinned_handle(vm, handleId);
+  if (handle == NULL)
     return NULL;
 
   BridgeState* bridge = bridge_from_vm(vm);
   if (bridge == NULL)
     return NULL;
 
-  LOGD("saynaa_objGetattr: handleId=%d, name=%s, skipGetter=%d", handleId,
-      name ? (*env)->GetStringUTFChars(env, name, NULL) : "NULL", skipGetter);
+  char stackKey[MAX_JNI_STACK_STR];
+  const char* key;
+  jsize keyLen;
+  bool isCopy;
+  JNI_GET_STRING_FAST(env, name, key, keyLen, isCopy, stackKey, sizeof(stackKey));
 
   reserveSlots(vm, 2);
   int slot1 = nextSlot(vm, true);
 
-  const char* key = (*env)->GetStringUTFChars(env, name, NULL);
-  if (key == NULL)
-    return NULL;
+  // Utilize keyLen directly to skip strlen(key)
+  Var resultVar = varGetAttrib(vm, handle->value, newStringLength(vm, key, keyLen), skipGetter == JNI_TRUE, false);
 
-  Handle* handle = find_pinned_handle(vm, handleId);
-  if (handle == NULL) {
-    LOGE("saynaa_objGetattr: pinned handle not found: id: %d", handleId);
-    (*env)->ReleaseStringUTFChars(env, name, key);
-    return NULL;
-  }
-  Var objVar = handle->value;
-  Var resultVar = varGetAttrib(vm, objVar, newStringLength(vm, key, strlen(key)), skipGetter == JNI_TRUE, false);
-  LOGD("saynaa_objGetattr: result type: %s", varTypeName(resultVar));
-
-  (*env)->ReleaseStringUTFChars(env, name, key);
+  JNI_RELEASE_STRING_FAST(env, name, key, isCopy);
 
   vm->fiber->ret[slot1] = resultVar;
   jobject resultValue = slot_to_java(env, vm, bridge, slot1);
@@ -637,34 +579,31 @@ JNIEXPORT jboolean JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1moduleSetGl
   if (vm == NULL || name == NULL)
     return JNI_FALSE;
 
-  BridgeState* bridge = bridge_from_vm(vm);
-  const char* key = (*env)->GetStringUTFChars(env, name, NULL);
-  if (key == NULL)
-    return JNI_FALSE;
-
   Handle* handle = find_pinned_handle(vm, (int) pinnedHandleId);
-  if (handle == NULL) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
+  if (handle == NULL || !IS_OBJ_TYPE(handle->value, OBJ_MODULE))
     return JNI_FALSE;
-  }
 
   Module* module = (Module*) AS_OBJ(handle->value);
-  if (module == NULL) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
-    return JNI_FALSE;
-  }
+  BridgeState* bridge = bridge_from_vm(vm);
+
+  char stackKey[MAX_JNI_STACK_STR];
+  const char* key;
+  jsize keyLen;
+  bool isCopy;
+  JNI_GET_STRING_FAST(env, name, key, keyLen, isCopy, stackKey, sizeof(stackKey));
 
   int slot1 = nextSlot(vm, true);
 
   if (!object_to_slot(env, vm, bridge, slot1, value, "Failed to wrap Java value object.")) {
-    (*env)->ReleaseStringUTFChars(env, name, key);
+    JNI_RELEASE_STRING_FAST(env, name, key, isCopy);
     freeSlot(vm, slot1, 1);
     return JNI_FALSE;
   }
 
-  moduleSetGlobal(vm, module, key, (uint32_t) strlen(key), SLOT(slot1));
+  // Utilize keyLen instead of a redundant strlen(key)
+  moduleSetGlobal(vm, module, key, (uint32_t) keyLen, SLOT(slot1));
 
-  (*env)->ReleaseStringUTFChars(env, name, key);
+  JNI_RELEASE_STRING_FAST(env, name, key, isCopy);
   freeSlot(vm, slot1, 1);
   return JNI_TRUE;
 }
@@ -1086,31 +1025,30 @@ JNIEXPORT void JNICALL Java_com_saynaa_saynaajava_Saynaa_invokeCallbackMethodNat
     return;
 
   CallbackEntry* entry = find_callback(vm, (int) callbackId);
-  if (entry == NULL)
-    return;
-
-  if (!ensure_wrapper_classes(vm))
+  if (entry == NULL || !ensure_wrapper_classes(vm))
     return;
 
   if (vm->fiber != NULL)
     vm->fiber->error = NULL;
 
+  char stackMethodName[MAX_JNI_STACK_STR];
   const char* runtimeMethodName = NULL;
-  if (methodName != NULL)
-    runtimeMethodName = (*env)->GetStringUTFChars(env, methodName, NULL);
+  jsize nameLen;
+  bool isCopy = false;
+
+  if (methodName != NULL) {
+    JNI_GET_STRING_FAST(env, methodName, runtimeMethodName, nameLen, isCopy, stackMethodName,
+        sizeof(stackMethodName));
+  }
 
   bool ok = invoke_registered_callback(env, vm, bridge, entry, runtimeMethodName, args, NULL);
 
-  if (methodName != NULL && runtimeMethodName != NULL)
-    (*env)->ReleaseStringUTFChars(env, methodName, runtimeMethodName);
+  if (methodName != NULL) {
+    JNI_RELEASE_STRING_FAST(env, methodName, runtimeMethodName, isCopy);
+  }
 
-  if (!ok) {
-    const char* err = (vm->fiber != NULL && vm->fiber->error != NULL) ? vm->fiber->error->data : "<unknown>";
-    LOGE("invokeCallbackNative failed for callbackId=%d err=%s", (int) callbackId, err);
-    if (vm->fiber != NULL)
-      vm->fiber->error = NULL;
-  } else {
-    LOGI("invokeCallbackNative succeeded for callbackId=%d", (int) callbackId);
+  if (!ok && vm->fiber != NULL) {
+    vm->fiber->error = NULL; // Clear error to prevent cascading failure logs
   }
 }
 
@@ -1125,31 +1063,31 @@ JNIEXPORT jobject JNICALL Java_com_saynaa_saynaajava_Saynaa_invokeCallbackMethod
     return NULL;
 
   CallbackEntry* entry = find_callback(vm, (int) callbackId);
-  if (entry == NULL)
-    return NULL;
-
-  if (!ensure_wrapper_classes(vm))
+  if (entry == NULL || !ensure_wrapper_classes(vm))
     return NULL;
 
   if (vm->fiber != NULL)
     vm->fiber->error = NULL;
 
+  char stackMethodName[MAX_JNI_STACK_STR];
   const char* runtimeMethodName = NULL;
-  if (methodName != NULL)
-    runtimeMethodName = (*env)->GetStringUTFChars(env, methodName, NULL);
+  jsize nameLen;
+  bool isCopy = false;
+
+  if (methodName != NULL) {
+    JNI_GET_STRING_FAST(env, methodName, runtimeMethodName, nameLen, isCopy, stackMethodName,
+        sizeof(stackMethodName));
+  }
 
   jobject result = NULL;
   bool ok = invoke_registered_callback(env, vm, bridge, entry, runtimeMethodName, args, &result);
 
-  if (methodName != NULL && runtimeMethodName != NULL)
-    (*env)->ReleaseStringUTFChars(env, methodName, runtimeMethodName);
+  if (methodName != NULL) {
+    JNI_RELEASE_STRING_FAST(env, methodName, runtimeMethodName, isCopy);
+  }
 
-  if (!ok) {
-    const char* err = (vm->fiber != NULL && vm->fiber->error != NULL) ? vm->fiber->error->data : "<unknown>";
-    LOGE("invokeCallbackMethodWithResultNative failed for callbackId=%d err=%s", (int) callbackId, err);
-    if (vm->fiber != NULL)
-      vm->fiber->error = NULL;
-    return NULL;
+  if (!ok && vm->fiber != NULL) {
+    vm->fiber->error = NULL;
   }
 
   return result;

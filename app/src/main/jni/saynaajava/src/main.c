@@ -1,73 +1,99 @@
 #include "saynaa_internal.h"
 
-jstring get_java_object_name(JNIEnv* env, VM* vm, BridgeState* bridge, jobject target,
-    const char* errorPrefix, const char* nullMessage) {
-  if (target == NULL) {
-    SetRuntimeError(vm, nullMessage);
+/* ============================================================================
+ * Utility Functions & Memory Management
+ * ============================================================================ */
+
+char* str_dup_c(const char* s) {
+  if (s == NULL)
     return NULL;
+  size_t n = strlen(s);
+  char* out = (char*) malloc(n + 1);
+  if (out != NULL) {
+    memcpy(out, s, n + 1);
   }
-
-  jstring jGetName = (*env)->NewStringUTF(env, "getName");
-  if (jGetName == NULL) {
-    clear_jni_exception_with_log(env, "get_java_object_name:NewStringUTF");
-    SetRuntimeError(vm, "Failed to allocate JNI method name string.");
-    return NULL;
-  }
-
-  jclass objClass = safe_find_class(vm, env, "java/lang/Object", "get_java_object_name:Object");
-  if (objClass == NULL) {
-    (*env)->DeleteLocalRef(env, jGetName);
-    return NULL;
-  }
-  jobjectArray noArgs = (*env)->NewObjectArray(env, 0, objClass, NULL);
-  (*env)->DeleteLocalRef(env, objClass);
-  if (noArgs == NULL) {
-    clear_jni_exception_with_log(env, "get_java_object_name:NewObjectArray");
-    (*env)->DeleteLocalRef(env, jGetName);
-    SetRuntimeError(vm, "Failed to allocate JNI argument array.");
-    return NULL;
-  }
-
-  jobject classNameObj = (*env)->CallStaticObjectMethod(
-      env, bridge->javaBridgeClass, bridge->mCallJavaMethod, target, jGetName, noArgs);
-
-  (*env)->DeleteLocalRef(env, noArgs);
-  (*env)->DeleteLocalRef(env, jGetName);
-
-  if ((*env)->ExceptionCheck(env)) {
-    throw_if_exception(vm, env, errorPrefix);
-    return NULL;
-  }
-
-  if (classNameObj == NULL) {
-    SetRuntimeError(vm, nullMessage);
-    return NULL;
-  }
-
-  return (jstring) classNameObj;
+  return out;
 }
 
-void clear_callbacks(VM* vm) {
-  BridgeState* bridge = bridge_from_vm(vm);
-  if (bridge == NULL)
+JNIEnv* env_from_jvm(JavaVM* jvm) {
+  if (jvm == NULL)
+    return NULL;
+
+  JNIEnv* env = NULL;
+  if ((*jvm)->GetEnv(jvm, (void**) &env, JNI_VERSION_1_6) == JNI_OK) {
+    return env;
+  }
+
+  if ((*jvm)->AttachCurrentThread(jvm, &env, NULL) != JNI_OK) {
+    return NULL;
+  }
+
+  return env;
+}
+
+void throw_if_exception(VM* vm, JNIEnv* env, const char* prefix) {
+  if (!(*env)->ExceptionCheck(env))
     return;
 
-  CallbackEntry* it = bridge->callbacks;
-  while (it != NULL) {
-    CallbackEntry* next = it->next;
-    if (it->fnHandle != NULL)
-      releaseHandle(vm, it->fnHandle);
-    if (it->mapHandle != NULL)
-      releaseHandle(vm, it->mapHandle);
-    if (it->methodName != NULL)
-      free(it->methodName);
-    free(it);
-    it = next;
+  (*env)->ExceptionDescribe(env);
+  (*env)->ExceptionClear(env);
+  SetRuntimeErrorFmt(vm, "%s (JNI exception).", prefix);
+}
+
+void java_ref_destructor(void* ptr) {
+  JavaRef* ref = (JavaRef*) ptr;
+  if (ref == NULL)
+    return;
+
+  if (ref->magic != JAVA_REF_MAGIC) {
+    free(ref);
+    return;
   }
 
-  bridge->callbacks = NULL;
-  bridge->nextCallbackId = 1;
+  JNIEnv* env = env_from_jvm(ref->jvm);
+  if (env != NULL && ref->global != NULL) {
+    (*env)->DeleteGlobalRef(env, ref->global);
+  }
+
+  free(ref);
 }
+
+JavaRef* make_java_ref(JNIEnv* env, JavaVM* jvm, jobject obj) {
+  if (obj == NULL || env == NULL || jvm == NULL)
+    return NULL;
+
+  JavaRef* ref = (JavaRef*) malloc(sizeof(JavaRef));
+  if (ref == NULL)
+    return NULL;
+
+  ref->magic = JAVA_REF_MAGIC;
+  ref->jvm = jvm;
+  ref->global = (*env)->NewGlobalRef(env, obj);
+
+  if (ref->global == NULL) {
+    free(ref);
+    return NULL;
+  }
+
+  return ref;
+}
+
+JavaRef* clone_java_ref(JNIEnv* env, JavaRef* src) {
+  if (src == NULL || src->global == NULL)
+    return NULL;
+
+  jobject local = (*env)->NewLocalRef(env, src->global);
+  if (local == NULL)
+    return NULL;
+
+  JavaRef* out = make_java_ref(env, src->jvm, local);
+  (*env)->DeleteLocalRef(env, local);
+  return out;
+}
+
+/* ============================================================================
+ * Pinned Handles Subsystem
+ * ============================================================================ */
 
 void clear_pinned_handles(VM* vm) {
   BridgeState* bridge = bridge_from_vm(vm);
@@ -125,6 +151,32 @@ Handle* find_pinned_handle(VM* vm, int handleId) {
   return NULL;
 }
 
+/* ============================================================================
+ * Callbacks Subsystem
+ * ============================================================================ */
+
+void clear_callbacks(VM* vm) {
+  BridgeState* bridge = bridge_from_vm(vm);
+  if (bridge == NULL)
+    return;
+
+  CallbackEntry* it = bridge->callbacks;
+  while (it != NULL) {
+    CallbackEntry* next = it->next;
+    if (it->fnHandle != NULL)
+      releaseHandle(vm, it->fnHandle);
+    if (it->mapHandle != NULL)
+      releaseHandle(vm, it->mapHandle);
+    if (it->methodName != NULL)
+      free(it->methodName);
+    free(it);
+    it = next;
+  }
+
+  bridge->callbacks = NULL;
+  bridge->nextCallbackId = 1;
+}
+
 int register_callback(VM* vm, int slot) {
   BridgeState* bridge = bridge_from_vm(vm);
   if (bridge == NULL)
@@ -150,15 +202,13 @@ int register_callback(VM* vm, int slot) {
 
   if (bridge->nextCallbackId <= 0)
     bridge->nextCallbackId = 1;
+
   entry->id = bridge->nextCallbackId++;
   entry->fnHandle = fnHandle;
-  entry->mapHandle = NULL;
-  entry->methodName = NULL;
   entry->next = bridge->callbacks;
   bridge->callbacks = entry;
 
   LOGI("Registered callback id=%d from slot=%d", entry->id, slot);
-
   return entry->id;
 }
 
@@ -195,14 +245,13 @@ int register_map_callback(VM* vm, int mapSlot, const char* methodName) {
 
   if (bridge->nextCallbackId <= 0)
     bridge->nextCallbackId = 1;
+
   entry->id = bridge->nextCallbackId++;
-  entry->fnHandle = NULL;
   entry->mapHandle = mapHandle;
   entry->next = bridge->callbacks;
   bridge->callbacks = entry;
 
-  LOGI("Registered map callback id=%d method=%s", entry->id, entry->methodName == NULL ? "" : entry->methodName);
-
+  LOGI("Registered map callback id=%d method=%s", entry->id, entry->methodName);
   return entry->id;
 }
 
@@ -221,10 +270,41 @@ CallbackEntry* find_callback(VM* vm, int callbackId) {
   return NULL;
 }
 
-// Invoke a registered callback entry.
-// - function callback  : call directly with all Java args converted to Saynaa slots.
-// - map/table callback : resolve by runtime method name (exact match), then call if function
-// exists. Missing map key is intentionally treated as a no-op.
+// Internal core execution function for callbacks
+static bool execute_callback_core(VM* vm, CallbackEntry* entry, const char* runtimeMethodName,
+    int argStart, int argCount, int resultSlot) {
+  if (entry->fnHandle != NULL) {
+    int fnSlot = nextSlot(vm, false);
+    setSlotHandle(vm, fnSlot, entry->fnHandle);
+    return CallFunction(vm, fnSlot, argCount, argStart, resultSlot);
+  }
+
+  if (entry->mapHandle != NULL) {
+    const char* methodKey = (runtimeMethodName && runtimeMethodName[0] != '\0') ? runtimeMethodName
+                                                                                : entry->methodName;
+
+    if (methodKey == NULL || methodKey[0] == '\0') {
+      SetRuntimeError(vm, "Callback method name is missing.");
+      return false;
+    }
+
+    int keySlot = nextSlot(vm, false);
+    int fnSlot = nextSlot(vm, false);
+    int mapSlot = nextSlot(vm, false);
+
+    setSlotHandle(vm, mapSlot, entry->mapHandle);
+    setSlotString(vm, keySlot, methodKey);
+
+    if (CallMethod(vm, mapSlot, "get", 1, keySlot, fnSlot) && GetSlotType(vm, fnSlot) == vCLOSURE) {
+      return CallFunction(vm, fnSlot, argCount, argStart, resultSlot);
+    }
+    // Missing callback in map is intentionally treated as an allowed no-op
+    return true;
+  }
+
+  return false;
+}
+
 bool invoke_registered_callback(JNIEnv* env, VM* vm, BridgeState* bridge, CallbackEntry* entry,
     const char* runtimeMethodName, jobjectArray argsArray, jobject* outResult) {
   if (vm == NULL || bridge == NULL || entry == NULL)
@@ -233,10 +313,7 @@ bool invoke_registered_callback(JNIEnv* env, VM* vm, BridgeState* bridge, Callba
   if (outResult != NULL)
     *outResult = NULL;
 
-  int argc = 0;
-  if (argsArray != NULL)
-    argc = (int) (*env)->GetArrayLength(env, argsArray);
-
+  int argc = (argsArray != NULL) ? (int) (*env)->GetArrayLength(env, argsArray) : 0;
   reserveSlots(vm, argc + 8);
 
   int argStart = allocSlot(vm, argc);
@@ -250,39 +327,8 @@ bool invoke_registered_callback(JNIEnv* env, VM* vm, BridgeState* bridge, Callba
       return false;
   }
 
-  bool ok = false;
   int resultSlot = nextSlot(vm, false);
-
-  int slot1 = nextSlot(vm, false);
-
-  if (entry->fnHandle != NULL) {
-    setSlotHandle(vm, slot1, entry->fnHandle);
-    ok = CallFunction(vm, slot1, argc, argStart, resultSlot);
-  } else if (entry->mapHandle != NULL) {
-    const char* methodKey = runtimeMethodName;
-    if (methodKey == NULL || methodKey[0] == '\0')
-      methodKey = entry->methodName;
-
-    if (methodKey == NULL || methodKey[0] == '\0') {
-      SetRuntimeError(vm, "callback method name is missing.");
-      return false;
-    }
-
-    int keySlot = nextSlot(vm, false);
-    int fnSlot = nextSlot(vm, false);
-
-    int slot5 = nextSlot(vm, false);
-
-    setSlotHandle(vm, slot5, entry->mapHandle);
-    setSlotString(vm, keySlot, methodKey);
-
-    if (CallMethod(vm, slot5, "get", 1, keySlot, fnSlot) && GetSlotType(vm, fnSlot) == vCLOSURE) {
-      ok = CallFunction(vm, fnSlot, argc, argStart, resultSlot);
-    } else {
-      // If the callback method is absent in the map/table, do nothing.
-      ok = true;
-    }
-  }
+  bool ok = execute_callback_core(vm, entry, runtimeMethodName, argStart, argc, resultSlot);
 
   if (ok && outResult != NULL && resultSlot > 0) {
     *outResult = slot_to_java(env, vm, bridge, resultSlot);
@@ -307,36 +353,8 @@ bool invoke_registered_callback_from_slots(JNIEnv* env, VM* vm, BridgeState* bri
   int argEnd = argCount > 0 ? (argStart + argCount - 1) : (argStart - 1);
   reserveSlots(vm, argEnd + 8);
 
-  bool ok = false;
   int resultSlot = nextSlot(vm, false);
-
-  if (entry->fnHandle != NULL) {
-    int slot1 = nextSlot(vm, false);
-    setSlotHandle(vm, slot1, entry->fnHandle);
-    ok = CallFunction(vm, slot1, argCount, argStart, resultSlot);
-  } else if (entry->mapHandle != NULL) {
-    const char* methodKey = runtimeMethodName;
-    if (methodKey == NULL || methodKey[0] == '\0')
-      methodKey = entry->methodName;
-
-    if (methodKey == NULL || methodKey[0] == '\0') {
-      SetRuntimeError(vm, "callback method name is missing.");
-      return false;
-    }
-
-    int keySlot = nextSlot(vm, false);
-    int fnSlot = nextSlot(vm, false);
-    int slot5 = nextSlot(vm, false);
-
-    setSlotHandle(vm, slot5, entry->mapHandle);
-    setSlotString(vm, keySlot, methodKey);
-
-    if (CallMethod(vm, slot5, "get", 1, keySlot, fnSlot) && GetSlotType(vm, fnSlot) == vCLOSURE) {
-      ok = CallFunction(vm, fnSlot, argCount, argStart, resultSlot);
-    } else {
-      ok = true;
-    }
-  }
+  bool ok = execute_callback_core(vm, entry, runtimeMethodName, argStart, argCount, resultSlot);
 
   if (ok && outResult != NULL && resultSlot > 0) {
     *outResult = slot_to_java(env, vm, bridge, resultSlot);
@@ -359,8 +377,13 @@ jobject create_native_callback_proxy(JNIEnv* env, VM* vm, BridgeState* bridge, j
     return NULL;
   }
 
-  // methodName can be a concrete name (SAM/explicit callback) or wildcard "*" for map callbacks.
   jstring jMethod = (*env)->NewStringUTF(env, methodName == NULL ? "*" : methodName);
+  if (jMethod == NULL) {
+    (*env)->DeleteLocalRef(env, saynaaObj);
+    SetRuntimeError(vm, "Failed to allocate method name string.");
+    return NULL;
+  }
+
   jobject proxy = (*env)->CallStaticObjectMethod(env, bridge->javaBridgeClass,
       bridge->mCreateNativeCallbackProxy, saynaaObj, jInterface, jMethod, (jint) callbackId);
 
@@ -380,13 +403,64 @@ jobject create_native_callback_proxy(JNIEnv* env, VM* vm, BridgeState* bridge, j
   return proxy;
 }
 
+/* ============================================================================
+ * JNI Helper Functions & Output Buffers
+ * ============================================================================ */
+
+jstring get_java_object_name(JNIEnv* env, VM* vm, BridgeState* bridge, jobject target,
+    const char* errorPrefix, const char* nullMessage) {
+  if (target == NULL) {
+    SetRuntimeError(vm, nullMessage);
+    return NULL;
+  }
+
+  jstring jGetName = (*env)->NewStringUTF(env, "getName");
+  if (jGetName == NULL) {
+    clear_jni_exception_with_log(env, "get_java_object_name:NewStringUTF");
+    SetRuntimeError(vm, "Failed to allocate JNI method name string.");
+    return NULL;
+  }
+
+  jclass objClass = safe_find_class(vm, env, "java/lang/Object", "get_java_object_name:Object");
+  if (objClass == NULL) {
+    (*env)->DeleteLocalRef(env, jGetName);
+    return NULL;
+  }
+
+  jobjectArray noArgs = (*env)->NewObjectArray(env, 0, objClass, NULL);
+  (*env)->DeleteLocalRef(env, objClass);
+  if (noArgs == NULL) {
+    clear_jni_exception_with_log(env, "get_java_object_name:NewObjectArray");
+    (*env)->DeleteLocalRef(env, jGetName);
+    SetRuntimeError(vm, "Failed to allocate JNI argument array.");
+    return NULL;
+  }
+
+  jobject classNameObj = (*env)->CallStaticObjectMethod(
+      env, bridge->javaBridgeClass, bridge->mCallJavaMethod, target, jGetName, noArgs);
+
+  (*env)->DeleteLocalRef(env, noArgs);
+  (*env)->DeleteLocalRef(env, jGetName);
+
+  if ((*env)->ExceptionCheck(env)) {
+    throw_if_exception(vm, env, errorPrefix);
+    return NULL;
+  }
+
+  if (classNameObj == NULL) {
+    SetRuntimeError(vm, nullMessage);
+    return NULL;
+  }
+
+  return (jstring) classNameObj;
+}
+
 void android_stdout_write(VM* vm, const char* text) {
   (void) vm;
   LOGI("%s", text == NULL ? "" : text);
 }
 
 void android_stderr_write(VM* vm, const char* text) {
-  //LOGE("%s", text == NULL ? "" : text);
   if (vm == NULL || text == NULL || text[0] == '\0')
     return;
 
@@ -414,115 +488,38 @@ void android_stderr_write(VM* vm, const char* text) {
   (*env)->DeleteLocalRef(env, saynaaObj);
 }
 
-char* str_dup_c(const char* s) {
-  if (s == NULL)
-    return NULL;
-  size_t n = strlen(s);
-  char* out = (char*) malloc(n + 1);
-  if (out == NULL)
-    return NULL;
-  memcpy(out, s, n + 1);
-  return out;
-}
-
 jobject bridge_find_class_exact(JNIEnv* env, VM* vm, BridgeState* bridge, const char* className) {
   jstring jName = (*env)->NewStringUTF(env, className == NULL ? "" : className);
+  if (jName == NULL) {
+    SetRuntimeError(vm, "Out of memory resolving Java class name.");
+    return NULL;
+  }
+
   jobject cls = (*env)->CallStaticObjectMethod(env, bridge->javaBridgeClass, bridge->mFindClass, jName);
   (*env)->DeleteLocalRef(env, jName);
 
   if ((*env)->ExceptionCheck(env)) {
-    throw_if_exception(vm, env, "java class resolution failed");
+    throw_if_exception(vm, env, "Java class resolution failed");
     return NULL;
   }
 
   return cls;
 }
 
-JNIEnv* env_from_jvm(JavaVM* jvm) {
-  if (jvm == NULL)
-    return NULL;
-
-  JNIEnv* env = NULL;
-  if ((*jvm)->GetEnv(jvm, (void**) &env, JNI_VERSION_1_6) == JNI_OK) {
-    return env;
-  }
-
-  if ((*jvm)->AttachCurrentThread(jvm, &env, NULL) != JNI_OK) {
-    return NULL;
-  }
-
-  return env;
-}
-
-void throw_if_exception(VM* vm, JNIEnv* env, const char* prefix) {
-  if (!(*env)->ExceptionCheck(env))
-    return;
-
-  (*env)->ExceptionDescribe(env);
-  (*env)->ExceptionClear(env);
-  SetRuntimeErrorFmt(vm, "%s (JNI exception).", prefix);
-}
-
-void java_ref_destructor(void* ptr) {
-  JavaRef* ref = (JavaRef*) ptr;
-  if (ref == NULL)
-    return;
-  if (ref->magic != JAVA_REF_MAGIC) {
-    free(ref);
-    return;
-  }
-
-  JNIEnv* env = env_from_jvm(ref->jvm);
-  if (env != NULL && ref->global != NULL) {
-    (*env)->DeleteGlobalRef(env, ref->global);
-  }
-
-  free(ref);
-}
-
-JavaRef* make_java_ref(JNIEnv* env, JavaVM* jvm, jobject obj) {
-  if (obj == NULL)
-    return NULL;
-
-  JavaRef* ref = (JavaRef*) malloc(sizeof(JavaRef));
-  if (ref == NULL)
-    return NULL;
-
-  ref->magic = JAVA_REF_MAGIC;
-  ref->jvm = jvm;
-  ref->global = (*env)->NewGlobalRef(env, obj);
-
-  if (ref->global == NULL) {
-    free(ref);
-    return NULL;
-  }
-
-  return ref;
-}
-
-JavaRef* clone_java_ref(JNIEnv* env, JavaRef* src) {
-  if (src == NULL || src->global == NULL)
-    return NULL;
-  jobject local = (*env)->NewLocalRef(env, src->global);
-  if (local == NULL)
-    return NULL;
-  JavaRef* out = make_java_ref(env, src->jvm, local);
-  (*env)->DeleteLocalRef(env, local);
-  return out;
-}
+/* ============================================================================
+ * Java Instance Converters
+ * ============================================================================ */
 
 bool ensure_wrapper_classes(VM* vm);
 
 bool create_java_instance(VM* vm, Handle** clsHandlePtr, JavaRef* ref, int outSlot) {
   if (clsHandlePtr == NULL) {
-    SetRuntimeError(vm, "Internal error: class handle pointer is null.");
+    SetRuntimeError(vm, "Internal error: Class handle pointer is null.");
     return false;
   }
 
-  if (*clsHandlePtr == NULL) {
-    if (!ensure_wrapper_classes(vm)) {
-      return false;
-    }
+  if (*clsHandlePtr == NULL && !ensure_wrapper_classes(vm)) {
+    return false;
   }
 
   if (*clsHandlePtr == NULL || ref == NULL) {
@@ -533,36 +530,29 @@ bool create_java_instance(VM* vm, Handle** clsHandlePtr, JavaRef* ref, int outSl
   int slot1 = nextSlot(vm, true);
   int slot2 = nextSlot(vm, true);
 
-  LOGI("Creating Java instance: clsHandle=%p, ref=%p, outSlot=%d, slot1=%d, slot2=%d",
-      (void*) *clsHandlePtr, (void*) ref, outSlot, slot1, slot2);
+  LOGI("Creating Java instance: clsHandle=%p, ref=%p, outSlot=%d", (void*) *clsHandlePtr, (void*) ref, outSlot);
 
   setSlotHandle(vm, slot1, *clsHandlePtr);
   setSlotPointer(vm, slot2, ref, NULL);
 
-  bool state = true;
-
-  if (!NewInstance(vm, slot1, outSlot, 1, slot2)) {
-    state = false;
-    goto L_return;
+  bool ok = NewInstance(vm, slot1, outSlot, 1, slot2);
+  if (ok) {
+    newHandle(vm, SLOT(outSlot));
   }
-
-  newHandle(vm, SLOT(outSlot));
-
-L_return:
 
   freeSlot(vm, slot1, 1);
   freeSlot(vm, slot2, 1);
 
-  return state;
+  return ok;
 }
 
 bool create_java_method_instance(VM* vm, JavaRef* target, const char* method_name, bool is_static, int outSlot) {
   BridgeState* bridge = bridge_from_vm(vm);
   if (bridge != NULL && bridge->clsJavaMethod == NULL) {
-    if (!ensure_wrapper_classes(vm)) {
+    if (!ensure_wrapper_classes(vm))
       return false;
-    }
   }
+
   if (bridge == NULL || bridge->clsJavaMethod == NULL || target == NULL || method_name == NULL) {
     SetRuntimeError(vm, "Internal error creating JavaMethod instance.");
     return false;
@@ -575,34 +565,22 @@ bool create_java_method_instance(VM* vm, JavaRef* target, const char* method_nam
   int slot3 = nextSlot(vm, false);
   int slot4 = nextSlot(vm, false);
 
-  LOGI("Creating Java method instance: clsshndle: %p, target: %p, method: %s, is_static: %d, "
-       "outSlot: %d, slot1: %d, slot2: %d, slot3: %d, slot4: %d",
-      (void*) bridge->clsJavaMethod, (void*) target, method_name == NULL ? "" : method_name,
-      is_static ? 1 : 0, outSlot, slot1, slot2, slot3, slot4);
-
   setSlotHandle(vm, slot1, bridge->clsJavaMethod);
   setSlotPointer(vm, slot2, target, NULL);
   setSlotString(vm, slot3, method_name);
   setSlotBool(vm, slot4, is_static);
 
-  bool state = true;
-
-  if (!NewInstance(vm, slot1, outSlot, 3, slot2)) {
-    state = false;
-    goto L_return;
+  bool ok = NewInstance(vm, slot1, outSlot, 3, slot2);
+  if (ok) {
+    newHandle(vm, SLOT(outSlot));
   }
-  LOGI("Java method instance: done");
-
-  newHandle(vm, SLOT(outSlot));
-
-L_return:
 
   freeSlot(vm, slot1, 1);
   freeSlot(vm, slot2, 1);
   freeSlot(vm, slot3, 1);
   freeSlot(vm, slot4, 1);
 
-  return state;
+  return ok;
 }
 
 jobject slot_to_java(JNIEnv* env, VM* vm, BridgeState* bridge, int slot) {
@@ -649,14 +627,14 @@ jobject make_args_array(JNIEnv* env, VM* vm, BridgeState* bridge, int startSlot,
   return args;
 }
 
-// Best-effort resolve of the currently executing module for global injection.
 Module* current_module_from_vm(VM* vm) {
   if (vm == NULL || vm->fiber == NULL)
     return NULL;
 
   if (vm->fiber->frame_count <= 0) {
-    if (vm->fiber->closure != NULL && vm->fiber->closure->fn != NULL)
+    if (vm->fiber->closure != NULL && vm->fiber->closure->fn != NULL) {
       return vm->fiber->closure->fn->owner;
+    }
     return NULL;
   }
 
@@ -666,6 +644,10 @@ Module* current_module_from_vm(VM* vm) {
 
   return frame->closure->fn->owner;
 }
+
+/* ============================================================================
+ * Wrapper Class Initialization
+ * ============================================================================ */
 
 bool register_java_wrapper_classes(VM* vm) {
   BridgeState* bridge = bridge_from_vm(vm);
@@ -724,9 +706,11 @@ bool ensure_wrapper_classes(VM* vm) {
   BridgeState* bridge = bridge_from_vm(vm);
   if (bridge == NULL)
     return false;
+
   if (bridge->javaWrapperModule != NULL && bridge->clsJavaClass != NULL
       && bridge->clsJavaObject != NULL && bridge->clsJavaMethod != NULL) {
     return true;
   }
+
   return register_java_wrapper_classes(vm);
 }
