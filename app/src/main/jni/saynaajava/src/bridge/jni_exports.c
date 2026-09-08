@@ -2,12 +2,6 @@
 #include "saynaa_internal.h"
 #include "saynaa_jni.h"
 
-static Result run_string_pcall(VM* vm, const char* code) {
-  if (vm == NULL || code == NULL)
-    return RESULT_RUNTIME_ERROR;
-  return RunStringPcall(vm, code);
-}
-
 saynaa_function(_debug, "debug(msg:Var) -> Null", "Print the string representation of msg to logcat with INFO level.") {
   const char* s;
   if (!ValidateSlotString(vm, 1, &s, NULL))

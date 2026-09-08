@@ -3,11 +3,6 @@
 #include <jni.h>
 
 JNIEXPORT jlong JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1open(JNIEnv* env, jobject thiz);
-JNIEXPORT jobject JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1pcall(
-    JNIEnv* env, jobject thiz, jstring functionName, jobjectArray args);
-JNIEXPORT jint JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1doFile(JNIEnv* env, jobject thiz, jstring fileName);
-JNIEXPORT jint JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1doString(JNIEnv* env, jobject thiz, jstring code);
-JNIEXPORT void JNICALL Java_com_saynaa_saynaajava_Saynaa_execute(JNIEnv* env, jobject thiz, jobject context);
 JNIEXPORT jobject JNICALL Java_com_saynaa_saynaajava_Saynaa_invokeCallbackMethodWithResultNative(
     JNIEnv* env, jobject thiz, jint callbackId, jstring methodName, jobjectArray args);
 JNIEXPORT jobject JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1getGlobal(

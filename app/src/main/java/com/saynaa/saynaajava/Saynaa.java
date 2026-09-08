@@ -5,7 +5,6 @@ import android.util.Log;
 import android.view.View;
 import com.saynaa.activity.SaynaaActivity;
 import com.saynaa.saynaajava.JavaMethodBinding;
-import com.saynaa.saynaajava.PCallResult;
 import com.saynaa.saynaajava.datatype.*;
 import com.saynaa.view.ErrorWindow;
 import java.io.File;
