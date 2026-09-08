@@ -1,0 +1,170 @@
+import "android.widget.*"
+import "android.view.*"
+import "android.text.*"
+import "com.saynaa.R"
+
+activity.setTheme(R.style.LightTheme6)
+
+import time
+
+function print(msg)
+    text = mTextView1.getText()
+    mTextView1.setText(text .. "\n" .. msg)
+end
+
+layout = {
+    LinearLayout,
+    orientation: 'vertical',
+    padding: '16dp',
+    layout_width: 'match_parent',
+    layout_height: 'match_parent',
+    {
+        TextView,
+        id: 'mTextView1',
+        text: 'Benchmarking Saynaa...',
+        textSize: '16sp',
+        layout_width: 'match_parent',
+        layout_height: 'wrap_content',
+        layout_marginBottom: '12dp',
+        textIsSelectable: true,
+    },
+    {
+        Button,
+        id: 'benchmark',
+        text: 'Benchmark',
+        layout_width: 'match_parent',
+        layout_height: 'wrap_content',
+        backgroundColor: '#6200EE',
+        textColor: '#FFFFFF',
+        padding: '12dp',
+        layout_marginBottom: '12dp'
+    }
+}
+
+view = loadlayout(activity, layout)
+activity.setContentView(view)
+
+View = java.bindClass("android.view.View")
+FrameLayoutParams = java.bindClass('android.widget.FrameLayout$LayoutParams')
+
+testView = View(activity)
+params = FrameLayoutParams(-1, -2)
+
+map = {
+  name: 123
+}
+
+function benchmark(name, func)
+    times = []
+
+    for i in 0..1000 do
+        t0 = time.clock()
+        func()
+        t1 = time.clock()
+        times[i] = (t1 - t0) * 1000
+    end
+
+    min = times[1]
+    max = times[1]
+    total = 0
+
+    for i in 0..1000 do
+        t = times[i]
+
+        if t < min then
+            min = t
+        end
+
+        if t > max then
+            max = t
+        end
+
+        total = total + t
+    end
+
+    print("")
+    print("=== " .. name .. " ===")
+    print("First:   " .. times[1] .. " ms")
+    print("Second:  " .. times[2] .. " ms")
+    print("Min:     " .. min .. " ms")
+    print("Max:     " .. max .. " ms")
+    print("Average: " .. (total / 1000) .. " ms")
+end
+
+
+benchmark("setLayoutParams", function()
+    testView.setLayoutParams(params)
+end)
+
+benchmark("Saynaa Map set", function()
+    map.name = 123
+end)
+
+benchmark("Saynaa Map get", function()
+    x = map.name
+end)
+
+benchmark("Saynaa Map set&get", function()
+    map.name = map.name
+end)
+
+benchmark("setId", function()
+    testView.setId(123)
+end)
+
+benchmark("setVisibility", function()
+    testView.setVisibility(View.VISIBLE)
+end)
+
+benchmark("setPadding", function()
+    testView.setPadding(1, 1, 1, 1)
+end)
+
+benchmark("setEnabled", function()
+    testView.setEnabled(true)
+end)
+
+benchmark("setClickable", function()
+    testView.setClickable(true)
+end)
+
+benchmark("getId", function()
+    testView.getId()
+end)
+
+benchmark("getVisibility", function()
+    testView.getVisibility()
+end)
+
+benchmark("setVisibility literal", function()
+    testView.setVisibility(0)
+end)
+
+benchmark("setVisibility constant", function()
+    testView.setVisibility(View.VISIBLE)
+end)
+
+benchmark("setVisibility variable", function()
+    x = 0
+    testView.setVisibility(x)
+end)
+
+benchmark("View.VISIBLE", function()
+    x = View.VISIBLE
+end)
+
+benchmark("View.GONE", function()
+    x = View.GONE
+end)
+
+benchmark("View.INVISIBLE", function()
+    x = View.INVISIBLE
+end)
+
+benchmark("View constructor", function()
+    v = View(activity)
+end)
+
+benchmark("LayoutParams constructor", function()
+    p = FrameLayoutParams(-1, -2)
+end)

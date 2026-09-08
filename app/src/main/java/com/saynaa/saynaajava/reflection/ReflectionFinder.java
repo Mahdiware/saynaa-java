@@ -1,44 +1,32 @@
 package com.saynaa.saynaajava.reflection;
 
 import android.util.Log;
-import com.saynaa.saynaajava.JavaBridge;
-import com.saynaa.saynaajava.JavaFunction;
-import com.saynaa.saynaajava.JavaModule;
-import com.saynaa.saynaajava.SaynaaContext;
-import com.saynaa.saynaajava.SaynaaException;
 import com.saynaa.saynaajava.reflection.ReflectionKeys.ConstructorKey;
 import com.saynaa.saynaajava.reflection.ReflectionKeys.FieldKey;
 import com.saynaa.saynaajava.reflection.ReflectionKeys.MethodKey;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ReflectionFinder {
   private static final String TAG = "ReflectionFinder";
-  private static final Map<MethodKey, Method> methodCache = new HashMap<>();
-  private static final Map<FieldKey, Field> fieldCache = new HashMap<>();
-  private static final Map<FieldKey, Boolean> missingFieldCache = new HashMap<>();
 
+  // Thread-safe caches
   private static final Map<String, Class<?>> classCache = new ConcurrentHashMap<>();
+  private static final Map<MethodKey, Method> methodCache = new ConcurrentHashMap<>();
+  private static final Map<MethodKey, Boolean> missingMethodCache = new ConcurrentHashMap<>();
+  private static final Map<FieldKey, Field> fieldCache = new ConcurrentHashMap<>();
+  private static final Map<FieldKey, Boolean> missingFieldCache = new ConcurrentHashMap<>();
+  private static final Map<ConstructorKey, Constructor<?>> constructorCache = new ConcurrentHashMap<>();
+  private static final Map<Class<?>, Method[]> classMethodsCache = new ConcurrentHashMap<>();
 
-  private static final Map<MethodKey, Boolean> missingMethodCache = new HashMap<>();
-  private static final Map<String, Method> voidMethodCache = new HashMap<>();
-  private static final Map<String, Method> stringMethodCache = new HashMap<>();
-  private static final Map<String, Method> boolMethodCache = new HashMap<>();
-  private static final Map<String, Method> integerMethodCache = new HashMap<>();
-  private static final Map<String, Method> doubleMethodCache = new HashMap<>();
+  private static final List<ClassLoader> extraClassLoaders = new ArrayList<>();
 
-  private static final Map<Class<?>, Method[]> classMethodsCache = new HashMap<>();
-
-  private static final Map<ConstructorKey, Constructor<?>> constructorCache = new HashMap<>();
-
+  // --- Find Class ---
   public static Class<?> findClass(String className) {
     Class<?> cls = classCache.get(className);
     if (cls != null)
@@ -48,8 +36,8 @@ public class ReflectionFinder {
       cls = Class.forName(className);
       classCache.put(className, cls);
       return cls;
-    } catch (ClassNotFoundException e) {
-      // Fall through to custom loaders.
+    } catch (ClassNotFoundException ignored) {
+      // Fall through
     }
 
     for (ClassLoader loader : getExtraClassLoaders()) {
@@ -62,7 +50,7 @@ public class ReflectionFinder {
           return cls;
         }
       } catch (ClassNotFoundException ignored) {
-        // Try next loader.
+        // Try next loader
       }
     }
 
@@ -104,52 +92,29 @@ public class ReflectionFinder {
     return cls;
   }
 
-  // --- Find matching method ---
+  // --- Find Matching Method ---
   public static Method findMethod(Class<?> cls, String methodName, Object... args) {
+    if (cls == null || methodName == null)
+      return null;
+
     Object[] normalized = ReflectionNormalizer.normalizeArgs(args);
     Class<?>[] argTypes = new Class<?>[normalized.length];
     for (int i = 0; i < normalized.length; i++) {
       argTypes[i] = normalized[i] == null ? null : normalized[i].getClass();
     }
 
-    String cacheName = cls.getName() + "#" + methodName;
-    if (normalized.length == 0) {
-      Method cached = voidMethodCache.get(cacheName);
-      if (cached != null) {
-        return cached;
-      }
-    } else if (normalized.length == 1) {
-      Object arg = normalized[0];
-      if (arg instanceof String) {
-        Method cached = stringMethodCache.get(cacheName);
-        if (cached != null) {
-          return cached;
-        }
-      } else if (arg instanceof Boolean) {
-        Method cached = boolMethodCache.get(cacheName);
-        if (cached != null) {
-          return cached;
-        }
-      } else if (arg instanceof Number) {
-        Method cached = (arg instanceof Integer || arg instanceof Long || arg instanceof Short || arg instanceof Byte)
-                            ? integerMethodCache.get(cacheName)
-                            : doubleMethodCache.get(cacheName);
-        if (cached != null) {
-          return cached;
-        }
-      }
-    }
-
     MethodKey key = new MethodKey(cls, methodName, argTypes);
-    if (methodCache.containsKey(key)) {
-      return methodCache.get(key);
-    }
-    if (missingMethodCache.containsKey(key)) {
+
+    // Fast Path: Checked Cache First
+    Method cached = methodCache.get(key);
+    if (cached != null)
+      return cached;
+    if (missingMethodCache.containsKey(key))
       return null;
-    }
 
     Method bestMatch = null;
     int bestScore = Integer.MAX_VALUE;
+
     for (Method method : getMethodsCached(cls)) {
       if (!method.getName().equals(methodName))
         continue;
@@ -205,45 +170,36 @@ public class ReflectionFinder {
     }
 
     if (bestMatch != null) {
-      methodCache.put(key, bestMatch);
-
-      Class<?>[] params = bestMatch.getParameterTypes();
-      if (params.length == 0) {
-        voidMethodCache.put(cacheName, bestMatch);
-      } else if (params.length == 1) {
-        Class<?> p0 = params[0];
-        if (p0 == String.class || CharSequence.class.isAssignableFrom(p0)) {
-          stringMethodCache.put(cacheName, bestMatch);
-        } else if (p0 == boolean.class || p0 == Boolean.class) {
-          boolMethodCache.put(cacheName, bestMatch);
-        } else if (p0 == int.class || p0 == Integer.class || p0 == long.class || p0 == Long.class
-                   || p0 == short.class || p0 == Short.class || p0 == byte.class || p0 == Byte.class) {
-          integerMethodCache.put(cacheName, bestMatch);
-        } else if (p0 == float.class || p0 == Float.class || p0 == double.class
-                   || p0 == Double.class || Number.class.isAssignableFrom(p0)) {
-          doubleMethodCache.put(cacheName, bestMatch);
-        }
+      try {
+        bestMatch.setAccessible(true); // Speeds up reflection execution
+      } catch (Exception ignored) {
       }
+      methodCache.put(key, bestMatch);
     } else {
       missingMethodCache.put(key, Boolean.TRUE);
     }
     return bestMatch;
   }
 
-  // --- Find matching constructor ---
+  // --- Find Matching Constructor ---
   public static Constructor<?> findConstructor(Class<?> cls, Object... args) {
+    if (cls == null)
+      return null;
+
     Object[] normalized = ReflectionNormalizer.normalizeArgs(args);
     Class<?>[] argTypes = new Class<?>[normalized.length];
-    for (int i = 0; i < args.length; i++) {
+    for (int i = 0; i < normalized.length; i++) {
       argTypes[i] = normalized[i] == null ? null : normalized[i].getClass();
     }
+
     ConstructorKey key = new ConstructorKey(cls, argTypes);
-    if (constructorCache.containsKey(key)) {
-      return constructorCache.get(key);
-    }
+    Constructor<?> cached = constructorCache.get(key);
+    if (cached != null)
+      return cached;
 
     Constructor<?> best = null;
     int bestScore = Integer.MAX_VALUE;
+
     for (Constructor<?> ctor : cls.getConstructors()) {
       Class<?>[] paramTypes = ctor.getParameterTypes();
       if (paramTypes.length != normalized.length)
@@ -252,7 +208,7 @@ public class ReflectionFinder {
       boolean match = true;
       int score = 0;
       for (int i = 0; i < paramTypes.length; i++) {
-        int s = ReflectionFinder.matchScore(paramTypes[i], argTypes[i]);
+        int s = matchScore(paramTypes[i], argTypes[i]);
         if (s < 0) {
           match = false;
           break;
@@ -265,50 +221,56 @@ public class ReflectionFinder {
         bestScore = score;
       }
     }
+
     if (best != null) {
+      try {
+        best.setAccessible(true);
+      } catch (Exception ignored) {
+      }
       constructorCache.put(key, best);
       return best;
     }
+
     Log.e(TAG, "No matching constructor found for " + cls.getName());
     return null;
   }
 
+  // --- Find Field ---
   public static Field findFieldQuietly(Class<?> cls, String fieldName) {
     if (cls == null || fieldName == null)
       return null;
 
     FieldKey key = new FieldKey(cls, fieldName);
-    if (missingFieldCache.containsKey(key)) {
+    if (missingFieldCache.containsKey(key))
       return null;
-    }
 
     Field cached = fieldCache.get(key);
     if (cached != null)
       return cached;
 
+    Field field = null;
     try {
-      // direct lookup (fast path)
-      Field field = cls.getField(fieldName);
-      fieldCache.put(key, field);
-      return field;
-
+      field = cls.getField(fieldName);
     } catch (NoSuchFieldException ignored) {
-      // fallback: scan declared fields (important fix)
       try {
-        Field field = cls.getDeclaredField(fieldName);
-        field.setAccessible(true);
-
-        fieldCache.put(key, field);
-
-        return field;
-
-      } catch (NoSuchFieldException e2) {
+        field = cls.getDeclaredField(fieldName);
+      } catch (NoSuchFieldException ignored2) {
         missingFieldCache.put(key, Boolean.TRUE);
         return null;
       }
     }
+
+    if (field != null) {
+      try {
+        field.setAccessible(true);
+      } catch (Exception ignored) {
+      }
+      fieldCache.put(key, field);
+    }
+    return field;
   }
 
+  // --- Scoring & Helper utilities ---
   public static int matchScore(Class<?> paramType, Class<?> argType) {
     if (argType == null) {
       return paramType.isPrimitive() ? -1 : 4;
@@ -331,14 +293,12 @@ public class ReflectionFinder {
 
     if (Number.class.isAssignableFrom(paramType) && Number.class.isAssignableFrom(argType))
       return 2;
-
     if (paramType.isAssignableFrom(argType))
       return 3;
 
     return -1;
   }
 
-  // --- Convert boxed to primitive types for matching ---
   public static Class<?> toPrimitive(Class<?> cls) {
     if (cls == Integer.class)
       return int.class;
@@ -361,15 +321,13 @@ public class ReflectionFinder {
 
   public static Method[] getMethodsCached(Class<?> cls) {
     Method[] methods = classMethodsCache.get(cls);
-    if (methods != null) {
+    if (methods != null)
       return methods;
-    }
+
     methods = cls.getMethods();
     classMethodsCache.put(cls, methods);
     return methods;
   }
-
-  private static final List<ClassLoader> extraClassLoaders = new ArrayList<>();
 
   public static synchronized void setExtraClassLoaders(List<ClassLoader> loaders) {
     extraClassLoaders.clear();
@@ -378,7 +336,7 @@ public class ReflectionFinder {
     }
   }
 
-  public static synchronized void setExtraClassLoaders(ClassLoader loader) {
+  public static synchronized void addExtraClassLoader(ClassLoader loader) {
     if (loader != null) {
       extraClassLoaders.add(loader);
     }
@@ -386,12 +344,6 @@ public class ReflectionFinder {
 
   public static synchronized void removeExtraClassLoader(ClassLoader loader) {
     extraClassLoaders.remove(loader);
-  }
-
-  public static synchronized void addExtraClassLoader(ClassLoader loader) {
-    if (loader != null) {
-      extraClassLoaders.add(loader);
-    }
   }
 
   public static synchronized List<ClassLoader> getExtraClassLoaders() {

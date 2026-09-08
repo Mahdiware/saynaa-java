@@ -1,18 +1,12 @@
 package com.saynaa.saynaajava;
 
-import android.content.Context;
 import android.util.Log;
-import android.view.Menu;
 import com.saynaa.saynaajava.datatype.*;
 import com.saynaa.saynaajava.reflection.FieldHelper;
 import com.saynaa.saynaajava.reflection.ReflectionFinder;
-import com.saynaa.saynaajava.reflection.ReflectionKeys.ConstructorKey;
-import com.saynaa.saynaajava.reflection.ReflectionKeys.FieldKey;
-import com.saynaa.saynaajava.reflection.ReflectionKeys.MethodKey;
 import com.saynaa.saynaajava.reflection.ReflectionNormalizer;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -20,12 +14,7 @@ import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +23,7 @@ public class JavaBridge {
   private static final int MAX_BRIDGE_RECURSION_DEPTH = 64;
   private static final long MAX_SAFE_INTEGER_LONG = 9007199254740991L;
   private static final long MIN_SAFE_INTEGER_LONG = -9007199254740991L;
+  private static final Object[] EMPTY_ARGS = new Object[0];
 
   private static boolean isFiniteDouble(double value) {
     return !Double.isNaN(value) && !Double.isInfinite(value);
@@ -41,36 +31,31 @@ public class JavaBridge {
 
   private static Object decodeSlotNumber(double value) {
     if (!isFiniteDouble(value)) {
-      return Double.valueOf(value);
+      return value;
     }
 
-    double rounded = Math.rint(value);
-    if (rounded == value) {
-      if (value >= Integer.MIN_VALUE && value <= Integer.MAX_VALUE) {
-        return Integer.valueOf((int) value);
+    // Direct scalar cast is significantly faster than Math.rint() on ARM/ART
+    if (value == (long) value) {
+      long longVal = (long) value;
+      if (longVal >= Integer.MIN_VALUE && longVal <= Integer.MAX_VALUE) {
+        return (int) longVal;
       }
-
-      if (value >= MIN_SAFE_INTEGER_LONG && value <= MAX_SAFE_INTEGER_LONG) {
-        return Long.valueOf((long) value);
+      if (longVal >= MIN_SAFE_INTEGER_LONG && longVal <= MAX_SAFE_INTEGER_LONG) {
+        return longVal;
       }
     }
 
-    return Double.valueOf(value);
+    return value;
   }
 
   public static Object slotToJava(Saynaa saynaa, int slot) {
     if (saynaa == null || saynaa.isClosed()) {
       return null;
     }
-
-    // FORCE the scratchpad baseline to start well clear of the current slot
-    // and any active argument frame boundaries.
-    int scratchStart = Math.max(slot, saynaa.getSlotCount());
-
-    return slotToJavaInternal(saynaa, slot, scratchStart, 0);
+    return slotToJavaInternal(saynaa, slot, 0);
   }
 
-  private static Object slotToJavaInternal(Saynaa saynaa, int slot, int scratchSlot, int depth) {
+  private static Object slotToJavaInternal(Saynaa saynaa, int slot, int depth) {
     if (saynaa == null || saynaa.isClosed()) {
       return null;
     }
@@ -87,7 +72,7 @@ public class JavaBridge {
       return null;
 
     case Saynaa.SLOT_TYPE_BOOL:
-      return Boolean.valueOf(saynaa.getSlotBool(slot));
+      return saynaa.getSlotBool(slot);
 
     case Saynaa.SLOT_TYPE_NUMBER:
       return decodeSlotNumber(saynaa.getSlotNumber(slot));
@@ -97,6 +82,7 @@ public class JavaBridge {
 
     case Saynaa.SLOT_TYPE_POINTER:
       return saynaa.getSlotJavaObject(slot);
+
     case Saynaa.SLOT_TYPE_INSTANCE: {
       if (saynaa.isSlotJava(slot)) {
         return saynaa.getSlotJavaObject(slot);
@@ -104,13 +90,12 @@ public class JavaBridge {
         return new SaynaaInstance(saynaa, type, saynaa.captureSlotHandle(slot));
       }
     }
-    case Saynaa.SLOT_TYPE_LIST: {
-      return new SaynaaList(saynaa, type, saynaa.captureSlotHandle(slot));
-    }
 
-    case Saynaa.SLOT_TYPE_MAP: {
+    case Saynaa.SLOT_TYPE_LIST:
+      return new SaynaaList(saynaa, type, saynaa.captureSlotHandle(slot));
+
+    case Saynaa.SLOT_TYPE_MAP:
       return new SaynaaMap(saynaa, type, saynaa.captureSlotHandle(slot));
-    }
 
     case Saynaa.SLOT_TYPE_CLASS:
       return new SaynaaClass(saynaa, type, saynaa.captureSlotHandle(slot));
@@ -123,23 +108,25 @@ public class JavaBridge {
     }
   }
 
-  // findClass used in JNI
+  // Used in JNI
   public static Class<?> findClass(String className) {
     return ReflectionFinder.findClass(className);
   }
 
-  // getFieldValue and setFieldValue used in JNI
+  // Used in JNI
   public static boolean setFieldValue(Object objOrClass, String fieldName, Object value) {
     return FieldHelper.setFieldValue(objOrClass, fieldName, value);
   }
 
+  // Used in JNI
   public static Object getFieldValue(Object objOrClass, String fieldName) {
     return FieldHelper.getFieldValue(objOrClass, fieldName);
   }
 
   public static Object[] argsFromSlots(Saynaa saynaa, int startSlot, int argc) {
-    if (saynaa == null || saynaa.isClosed() || argc <= 0)
-      return new Object[0];
+    if (saynaa == null || saynaa.isClosed() || argc <= 0) {
+      return EMPTY_ARGS;
+    }
 
     Object[] out = new Object[argc];
     for (int i = 0; i < argc; i++) {
@@ -148,57 +135,67 @@ public class JavaBridge {
     return out;
   }
 
-  // --- Check if arg type matches parameter type ---
   private static boolean isAssignable(Class<?> paramType, Class<?> argType) {
-    if (paramType.isPrimitive()) {
-      if (argType == null)
-        return false;
-      Class<?> prim = ReflectionFinder.toPrimitive(argType);
-      if (paramType.equals(prim))
-        return true;
-
-      // Allow numeric conversions (Double -> int, etc.)
-      if ((paramType == int.class || paramType == long.class || paramType == short.class
-              || paramType == byte.class || paramType == float.class || paramType == double.class)
-          && Number.class.isAssignableFrom(argType)) {
-        return true;
-      }
-      return false;
-    }
     if (argType == null) {
-      // null can match any non-primitive type
       return !paramType.isPrimitive();
     }
 
-    // Allow numeric conversions for boxed numeric types.
-    if (Number.class.isAssignableFrom(paramType) && Number.class.isAssignableFrom(argType)) {
+    // Fast-path for exact or polymorphic match
+    if (paramType.isAssignableFrom(argType)) {
       return true;
     }
 
-    return paramType.isAssignableFrom(argType);
+    if (paramType.isPrimitive()) {
+      Class<?> prim = ReflectionFinder.toPrimitive(argType);
+      if (paramType.equals(prim)) {
+        return true;
+      }
+
+      return (paramType == int.class || paramType == long.class || paramType == short.class
+                 || paramType == byte.class || paramType == float.class || paramType == double.class)
+          && Number.class.isAssignableFrom(argType);
+    }
+
+    return Number.class.isAssignableFrom(paramType) && Number.class.isAssignableFrom(argType);
   }
 
   private static Object coerceArg(Class<?> paramType, Object arg) {
-    if (arg == null)
+    if (arg == null) {
       return null;
+    }
+
+    // Fast-path: object already matches requested type
+    if (!paramType.isPrimitive() && paramType.isInstance(arg)) {
+      return arg;
+    }
 
     if (paramType == int.class || paramType == Integer.class)
       return arg instanceof Number ? ((Number) arg).intValue() : arg;
     if (paramType == long.class || paramType == Long.class)
       return arg instanceof Number ? ((Number) arg).longValue() : arg;
+    if (paramType == double.class || paramType == Double.class)
+      return arg instanceof Number ? ((Number) arg).doubleValue() : arg;
+    if (paramType == float.class || paramType == Float.class)
+      return arg instanceof Number ? ((Number) arg).floatValue() : arg;
+    if (paramType == boolean.class || paramType == Boolean.class) {
+      if (arg instanceof Boolean)
+        return arg;
+      if (arg instanceof Number)
+        return ((Number) arg).intValue() != 0;
+      return arg;
+    }
     if (paramType == short.class || paramType == Short.class)
       return arg instanceof Number ? ((Number) arg).shortValue() : arg;
     if (paramType == byte.class || paramType == Byte.class)
       return arg instanceof Number ? ((Number) arg).byteValue() : arg;
-    if (paramType == float.class || paramType == Float.class)
-      return arg instanceof Number ? ((Number) arg).floatValue() : arg;
-    if (paramType == double.class || paramType == Double.class)
-      return arg instanceof Number ? ((Number) arg).doubleValue() : arg;
 
     return arg;
   }
 
   public static Object[] coerceArgs(Class<?>[] paramTypes, Object... args) {
+    if (args == null || args.length == 0) {
+      return EMPTY_ARGS;
+    }
     Object[] out = new Object[args.length];
     for (int i = 0; i < args.length; i++) {
       out[i] = coerceArg(paramTypes[i], args[i]);
@@ -212,7 +209,9 @@ public class JavaBridge {
       return null;
     }
 
-    Object[] normalized = ReflectionNormalizer.normalizeArgs(args);
+    Object[] normalized = (args == null || args.length == 0) ? EMPTY_ARGS
+                                                             : ReflectionNormalizer.normalizeArgs(args);
+
     Constructor<?> ctor = ReflectionFinder.findConstructor(cls, normalized);
     if (ctor == null) {
       logConstructorMismatch(cls, normalized);
@@ -220,12 +219,11 @@ public class JavaBridge {
     }
 
     try {
-      Object[] coercedArgs = coerceArgs(ctor.getParameterTypes(), normalized);
-      Object instance = ctor.newInstance(coercedArgs);
-      if (instance == null) {
-        Log.e(TAG, "Constructor returned null for " + cls.getName());
-      }
-      return instance;
+      Object[] coercedArgs = ctor.getParameterCount() == 0
+                                 ? EMPTY_ARGS
+                                 : coerceArgs(ctor.getParameterTypes(), normalized);
+
+      return ctor.newInstance(coercedArgs);
     } catch (InstantiationException | IllegalAccessException | InvocationTargetException
              | IllegalArgumentException e) {
       Log.e(TAG, "Failed to instantiate " + cls.getName(), e);
@@ -233,9 +231,7 @@ public class JavaBridge {
     }
   }
 
-  // --- Create Java object dynamically ---
   public static Object createJavaObject(String fullClassName, Object... args) {
-    logArgsDebug("createJavaObject", args);
     Class<?> cls = ReflectionFinder.findClass(fullClassName);
     if (cls == null) {
       Log.e(TAG, "Failed to find class: " + fullClassName);
@@ -260,10 +256,12 @@ public class JavaBridge {
   public static void logMethodMismatch(Class<?> cls, String methodName, Object[] args) {
     StringBuilder sb = new StringBuilder();
     sb.append("No matching method found: ").append(cls.getName()).append(".").append(methodName).append("(");
-    for (int i = 0; i < args.length; i++) {
-      if (i > 0)
-        sb.append(", ");
-      sb.append(args[i] == null ? "null" : args[i].getClass().getSimpleName());
+    if (args != null) {
+      for (int i = 0; i < args.length; i++) {
+        if (i > 0)
+          sb.append(", ");
+        sb.append(args[i] == null ? "null" : args[i].getClass().getSimpleName());
+      }
     }
     sb.append(")");
     Log.e(TAG, sb.toString());
@@ -276,16 +274,6 @@ public class JavaBridge {
       return ReflectionFinder.findClass((String) classOrName);
     if (classOrName != null)
       Log.e(TAG, "Unsupported class target: " + classOrName.getClass().getName());
-    return null;
-  }
-
-  private static String resolveInterfaceName(Object interfaceOrName) {
-    if (interfaceOrName instanceof String)
-      return (String) interfaceOrName;
-    if (interfaceOrName instanceof Class)
-      return ((Class<?>) interfaceOrName).getName();
-    if (interfaceOrName != null)
-      Log.e(TAG, "Unsupported interface target: " + interfaceOrName.getClass().getName());
     return null;
   }
 
@@ -343,54 +331,66 @@ public class JavaBridge {
     return out;
   }
 
-  // --- Call instance method ---
-  // it used in JNI, so it must be public
+  // Used in JNI
   public static Object callJavaMethod(Object javaObject, String methodName, Object... args) {
     Object target = ReflectionNormalizer.normalizeArg(javaObject);
     if (target == null) {
-      Log.e(TAG, "Java object is null.");
+      Log.e(TAG, "Java object is null for method: " + methodName);
       return null;
     }
 
-    Object[] normalized = ReflectionNormalizer.normalizeArgs(args);
-    logArgsDebug("callJavaMethod " + methodName, normalized);
-
     Class<?> cls = target.getClass();
+    Object[] normalized = (args == null || args.length == 0) ? EMPTY_ARGS
+                                                             : ReflectionNormalizer.normalizeArgs(args);
+
     Method method = ReflectionFinder.findMethod(cls, methodName, normalized);
-    if (method == null)
+    if (method == null) {
+      logMethodMismatch(cls, methodName, normalized);
       return null;
+    }
 
     try {
-      Object[] coercedArgs = method.isVarArgs() ? buildVarArgs(method.getParameterTypes(), normalized)
-                                                : coerceArgs(method.getParameterTypes(), normalized);
+      Object[] coercedArgs = method.getParameterCount() == 0
+                                 ? EMPTY_ARGS
+                                 : (method.isVarArgs()
+                                           ? buildVarArgs(method.getParameterTypes(), normalized)
+                                           : coerceArgs(method.getParameterTypes(), normalized));
+
       Object ret = method.invoke(target, coercedArgs);
       return ReflectionNormalizer.normalizeReturn(ret);
     } catch (IllegalAccessException | InvocationTargetException | IllegalArgumentException e) {
-      Log.e(TAG, "Error invoking method: " + methodName, e);
+      Log.e(TAG, "Error invoking method: " + methodName + " on " + cls.getName(), e);
       return null;
     }
   }
 
-  // --- Call static method ---
+  // Used in JNI
   public static Object callStaticJavaMethod(String className, String methodName, Object... args) {
     Class<?> cls = ReflectionFinder.findClass(className);
-    if (cls == null)
+    if (cls == null) {
       return null;
+    }
 
-    Object[] normalized = ReflectionNormalizer.normalizeArgs(args);
-    logArgsDebug("callStaticJavaMethod " + className + "." + methodName, normalized);
+    Object[] normalized = (args == null || args.length == 0) ? EMPTY_ARGS
+                                                             : ReflectionNormalizer.normalizeArgs(args);
 
     Method method = ReflectionFinder.findMethod(cls, methodName, normalized);
-    if (method == null)
+    if (method == null) {
+      logMethodMismatch(cls, methodName, normalized);
       return null;
+    }
 
     try {
-      Object[] coercedArgs = method.isVarArgs() ? buildVarArgs(method.getParameterTypes(), normalized)
-                                                : coerceArgs(method.getParameterTypes(), normalized);
+      Object[] coercedArgs = method.getParameterCount() == 0
+                                 ? EMPTY_ARGS
+                                 : (method.isVarArgs()
+                                           ? buildVarArgs(method.getParameterTypes(), normalized)
+                                           : coerceArgs(method.getParameterTypes(), normalized));
+
       Object ret = method.invoke(null, coercedArgs);
       return ReflectionNormalizer.normalizeReturn(ret);
     } catch (IllegalAccessException | InvocationTargetException | IllegalArgumentException e) {
-      Log.e(TAG, "Error invoking static method: " + methodName, e);
+      Log.e(TAG, "Error invoking static method: " + methodName + " on " + cls.getName(), e);
       return null;
     }
   }
@@ -401,13 +401,10 @@ public class JavaBridge {
 
     Object classOrName = slotToJava(saynaa, classSlot);
     Class<?> cls = resolveClass(classOrName);
-    if (cls == null)
+    if (cls == null || cls.isInterface())
       return false;
 
-    if (cls.isInterface())
-      return false;
-
-    Object created = null;
+    Object created;
     if (cls.isArray()) {
       if (argc < 2)
         return false;
@@ -434,8 +431,7 @@ public class JavaBridge {
       HashMap<Object, Object> map = new HashMap<>();
       if (argc >= 2 && saynaa.getSlotType(valueSlot) == Saynaa.SLOT_TYPE_MAP) {
         Object value = slotToJava(saynaa, valueSlot);
-        if (value instanceof Map)
-          map.putAll((Map<?, ?>) value);
+        if (value instanceof Map) map.putAll((Map<?, ?>) value);
       }
       created = map;
     } else {
@@ -472,10 +468,6 @@ public class JavaBridge {
       sb.append("]");
     }
     Log.e(TAG, sb.toString());
-
-    for (Constructor<?> ctor : cls.getConstructors()) {
-      Log.e(TAG, "Available ctor: " + ctor.toString());
-    }
   }
 
   public static void logArgsDebug(String prefix, Object[] args) {
@@ -494,9 +486,7 @@ public class JavaBridge {
         if (arg == null) {
           sb.append("null");
         } else {
-          sb.append(arg.getClass().getName());
-          sb.append("=");
-          sb.append(arg.toString());
+          sb.append(arg.getClass().getName()).append("=").append(arg.toString());
         }
       }
       sb.append("]");
@@ -550,7 +540,6 @@ public class JavaBridge {
       return true;
     }
 
-    // SaynaaObject
     if (normalized instanceof SaynaaObject) {
       SaynaaObject object = (SaynaaObject) normalized;
       if (object.getHandleId() > 0) {
@@ -567,7 +556,6 @@ public class JavaBridge {
       return false;
 
     Object normalized = ReflectionNormalizer.normalizeReturn(value);
-    // saynaa.reserveSlots(slot + 2);
 
     if (pushScalarToSlot(saynaa, slot, normalized)) {
       return true;
@@ -577,17 +565,12 @@ public class JavaBridge {
       return saynaa.bindJavaClass(slot, (Class<?>) normalized);
     }
 
-    // JavaMethodBinding
     if (normalized instanceof JavaMethodBinding) {
       JavaMethodBinding binding = (JavaMethodBinding) normalized;
       return saynaa.bindJavaMethod(slot, binding.getTarget(), binding.getMethodName());
     }
 
     return saynaa.bindJavaObject(slot, normalized);
-  }
-
-  private static IdentityHashMap<Object, Boolean> ensureVisitingMap(IdentityHashMap<Object, Boolean> visiting) {
-    return visiting != null ? visiting : new IdentityHashMap<Object, Boolean>();
   }
 
   public static Object createProxy(Saynaa saynaa, String interfaceName, String methodName, String script) {
@@ -704,32 +687,29 @@ public class JavaBridge {
       }
 
       final boolean wildcard = "*".equals(methodName);
-      InvocationHandler handler = new InvocationHandler() {
-        @Override
-        public Object invoke(Object proxy, Method method, Object[] args) {
-          String m = method.getName();
-          if ("toString".equals(m) && method.getParameterTypes().length == 0)
-            return "SaynaaNativeCallbackProxy(" + interfaceName + ")";
-          if ("hashCode".equals(m) && method.getParameterTypes().length == 0)
-            return System.identityHashCode(proxy);
-          if ("equals".equals(m) && method.getParameterTypes().length == 1)
-            return proxy == (args == null ? null : args[0]);
+      InvocationHandler handler = (proxy, method, args) -> {
+        String m = method.getName();
+        if ("toString".equals(m) && method.getParameterTypes().length == 0)
+          return "SaynaaNativeCallbackProxy(" + interfaceName + ")";
+        if ("hashCode".equals(m) && method.getParameterTypes().length == 0)
+          return System.identityHashCode(proxy);
+        if ("equals".equals(m) && method.getParameterTypes().length == 1)
+          return proxy == (args == null ? null : args[0]);
 
-          if (saynaa != null && !saynaa.isClosed()
-              && (wildcard || (methodName != null && methodName.equals(m)))) {
-            Class<?> rt = method.getReturnType();
-            try {
-              Object callbackResult = invokeCallbackFromJava(saynaa, callbackId, m, method, args);
-              return coerceCallbackResult(rt, callbackResult);
-            } catch (Throwable t) {
-              sendProxyError(saynaa, m, t);
-              return ReflectionNormalizer.defaultReturnFor(rt);
-            }
-          }
-
+        if (saynaa != null && !saynaa.isClosed()
+            && (wildcard || (methodName != null && methodName.equals(m)))) {
           Class<?> rt = method.getReturnType();
-          return ReflectionNormalizer.defaultReturnFor(rt);
+          try {
+            Object callbackResult = invokeCallbackFromJava(saynaa, callbackId, m, method, args);
+            return coerceCallbackResult(rt, callbackResult);
+          } catch (Throwable t) {
+            sendProxyError(saynaa, m, t);
+            return ReflectionNormalizer.defaultReturnFor(rt);
+          }
         }
+
+        Class<?> rt = method.getReturnType();
+        return ReflectionNormalizer.defaultReturnFor(rt);
       };
 
       return Proxy.newProxyInstance(loader, ifaces, handler);
@@ -746,7 +726,6 @@ public class JavaBridge {
 
       String[] names = interfaceName.split(",");
       if (names.length != 1) {
-        // Multi-interface proxy has no single default method.
         return "*";
       }
 
@@ -762,7 +741,6 @@ public class JavaBridge {
         if (!java.lang.reflect.Modifier.isAbstract(mod))
           continue;
         if (found != null && !found.equals(m.getName())) {
-          // Non-SAM interface; wildcard is used by map/table callbacks.
           return "*";
         }
         found = m.getName();

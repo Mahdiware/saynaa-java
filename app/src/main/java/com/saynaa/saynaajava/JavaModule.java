@@ -11,6 +11,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.Collections;
 
 public class JavaModule {
   protected final Saynaa saynaa;
@@ -37,6 +38,7 @@ public class JavaModule {
       module.setGlobal("instanceof", this, "instanceOf");
       module.setGlobal("length", this, "lengthOf");
       module.setGlobal("loadDex", this, "loadDex");
+      module.setGlobal("toast", this, "toast");
       module.setGlobal("getClassName", this, "getClassName");
       module.setGlobal("getPackageName", this, "getPackageName");
       module.setGlobal("getSimpleClassName", this, "getSimpleClassName");
@@ -52,8 +54,21 @@ public class JavaModule {
     saynaa.setDebugMode(mode);
   }
 
+  public void toast(String msg) {
+    Context context = saynaa.getContext();
+    if (context != null) {
+      android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show();
+    } else {
+      Log.e(TAG, "Context is null. Cannot show toast.");
+    }
+  }
+
   public void loadDex(String path) throws SaynaaException {
-    ReflectionFinder.setExtraClassLoaders(saynaa.getDexLoader().loadDex(path));
+    if (path == null || path.isEmpty()) {
+      throw new SaynaaException("Invalid dex file path");
+    }
+    ReflectionFinder.setExtraClassLoaders(
+        Collections.<ClassLoader>singletonList(saynaa.getDexLoader().loadDex(path)));
   }
 
   public Object newJavaObject(Object classOrName, Object... args) {

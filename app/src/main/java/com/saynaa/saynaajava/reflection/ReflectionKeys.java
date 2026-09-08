@@ -1,113 +1,129 @@
 package com.saynaa.saynaajava.reflection;
 
-import com.saynaa.saynaajava.JavaBridge;
-import com.saynaa.saynaajava.JavaFunction;
-import com.saynaa.saynaajava.JavaModule;
-import com.saynaa.saynaajava.SaynaaContext;
-
 public class ReflectionKeys {
-  // --- Utility classes for cache keys ---
+  private static final Class<?>[] EMPTY_TYPES = new Class<?>[0];
+
+  // --- Method Cache Key ---
   public static final class MethodKey {
     private final Class<?> cls;
     private final String methodName;
     private final Class<?>[] paramTypes;
+    private final int hash;
 
     public MethodKey(Class<?> cls, String methodName, Class<?>[] paramTypes) {
       this.cls = cls;
-      this.methodName = methodName;
-      this.paramTypes = paramTypes;
+      this.methodName = methodName != null ? methodName : "";
+      this.paramTypes = (paramTypes == null || paramTypes.length == 0) ? EMPTY_TYPES : paramTypes;
+
+      int h = this.cls != null ? this.cls.hashCode() : 0;
+      h = 31 * h + this.methodName.hashCode();
+      for (Class<?> p : this.paramTypes) {
+        h = 31 * h + (p != null ? p.hashCode() : 0);
+      }
+      this.hash = h;
+    }
+
+    @Override
+    public int hashCode() {
+      return hash;
     }
 
     @Override
     public boolean equals(Object o) {
+      if (this == o)
+        return true;
       if (!(o instanceof MethodKey))
         return false;
       MethodKey other = (MethodKey) o;
-      if (!cls.equals(other.cls) || !methodName.equals(other.methodName))
+
+      if (this.hash != other.hash)
         return false;
-      if (paramTypes.length != other.paramTypes.length)
+      if (this.cls != other.cls)
         return false;
-      for (int i = 0; i < paramTypes.length; i++) {
-        if (!classesEqual(paramTypes[i], other.paramTypes[i]))
+      if (!this.methodName.equals(other.methodName))
+        return false;
+      if (this.paramTypes.length != other.paramTypes.length)
+        return false;
+
+      for (int i = 0; i < this.paramTypes.length; i++) {
+        if (this.paramTypes[i] != other.paramTypes[i])
           return false;
       }
       return true;
     }
-
-    @Override
-    public int hashCode() {
-      int result = cls.hashCode();
-      result = 31 * result + methodName.hashCode();
-      for (Class<?> p : paramTypes) {
-        result = 31 * result + classHash(p);
-      }
-      return result;
-    }
   }
 
+  // --- Constructor Cache Key ---
   public static final class ConstructorKey {
     private final Class<?> cls;
     private final Class<?>[] paramTypes;
+    private final int hash;
 
     public ConstructorKey(Class<?> cls, Class<?>[] paramTypes) {
       this.cls = cls;
-      this.paramTypes = paramTypes;
+      this.paramTypes = (paramTypes == null || paramTypes.length == 0) ? EMPTY_TYPES : paramTypes;
+
+      int h = this.cls != null ? this.cls.hashCode() : 0;
+      for (Class<?> p : this.paramTypes) {
+        h = 31 * h + (p != null ? p.hashCode() : 0);
+      }
+      this.hash = h;
+    }
+
+    @Override
+    public int hashCode() {
+      return hash;
     }
 
     @Override
     public boolean equals(Object o) {
+      if (this == o)
+        return true;
       if (!(o instanceof ConstructorKey))
         return false;
       ConstructorKey other = (ConstructorKey) o;
-      if (!cls.equals(other.cls))
+
+      if (this.hash != other.hash)
         return false;
-      if (paramTypes.length != other.paramTypes.length)
+      if (this.cls != other.cls)
         return false;
-      for (int i = 0; i < paramTypes.length; i++) {
-        if (!classesEqual(paramTypes[i], other.paramTypes[i]))
+      if (this.paramTypes.length != other.paramTypes.length)
+        return false;
+
+      for (int i = 0; i < this.paramTypes.length; i++) {
+        if (this.paramTypes[i] != other.paramTypes[i])
           return false;
       }
       return true;
     }
-
-    @Override
-    public int hashCode() {
-      int result = cls.hashCode();
-      for (Class<?> p : paramTypes) {
-        result = 31 * result + classHash(p);
-      }
-      return result;
-    }
   }
 
+  // --- Field Cache Key ---
   public static final class FieldKey {
     private final Class<?> cls;
     private final String fieldName;
+    private final int hash;
 
     public FieldKey(Class<?> cls, String fieldName) {
       this.cls = cls;
-      this.fieldName = fieldName;
+      this.fieldName = fieldName != null ? fieldName : "";
+      this.hash = (this.cls != null ? this.cls.hashCode() : 0) * 31 + this.fieldName.hashCode();
+    }
+
+    @Override
+    public int hashCode() {
+      return hash;
     }
 
     @Override
     public boolean equals(Object o) {
+      if (this == o)
+        return true;
       if (!(o instanceof FieldKey))
         return false;
       FieldKey other = (FieldKey) o;
-      return cls.equals(other.cls) && fieldName.equals(other.fieldName);
+
+      return this.hash == other.hash && this.cls == other.cls && this.fieldName.equals(other.fieldName);
     }
-
-    @Override
-    public int hashCode() {
-      return cls.hashCode() * 31 + fieldName.hashCode();
-    }
-  }
-
-  private static int classHash(Class<?> c) {
-    return c == null ? 0 : c.hashCode();
-  }
-
-  private static boolean classesEqual(Class<?> a, Class<?> b) {
-    return a == b || (a != null && a.equals(b));
   }
 }

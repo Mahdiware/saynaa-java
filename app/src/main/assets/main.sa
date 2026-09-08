@@ -94,15 +94,6 @@ DemoLayout = {
     },
 
     {
-      CodeEditor,
-      id: 'DemoEditor',
-      layout_width: 'match_parent',
-      layout_height: '200dp',
-      text: 'function hello()\n  print("Hello, Saynaa!")\nend',
-      textSize: '16sp',
-    },
-  
-    {
       Button,
       id: 'nextpage',
       text: 'Next Page',
@@ -110,6 +101,18 @@ DemoLayout = {
       layout_height: 'wrap_content',
       backgroundColor: '#03DAC5',
       textColor: '#000000',
+      padding: '12dp',
+      layout_marginBottom: '12dp'
+    },
+
+    {
+      Button,
+      id: 'benchmark',
+      text: 'Benchmark',
+      layout_width: 'match_parent',
+      layout_height: 'wrap_content',
+      backgroundColor: '#6200EE',
+      textColor: '#FFFFFF',
       padding: '12dp',
       layout_marginBottom: '12dp'
     },
@@ -249,6 +252,13 @@ function onCreate(arg1)
     onClick: function(v)
       print('next page button clicked')
       activity.newActivity('main1')
+    end
+  }))
+
+  benchmark.setOnClickListener(View.OnClickListener({
+    onClick: function(v)
+      print('benchmark button clicked')
+      activity.newActivity('main3')
     end
   }))
 
