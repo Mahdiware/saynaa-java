@@ -21,15 +21,18 @@ jobs:
         -Dorg.gradle.parallel=true
         -Dorg.gradle.configureondemand=true
         -Dkotlin.incremental=true
+
       ANDROID_API: "34"
       BUILD_TOOLS_VERSION: "34.0.0"
       NDK_VERSION: "26.1.10909125"
       CMAKE_VERSION: "3.22.1"
 
     steps:
+      # CHECKOUT
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # JAVA
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -37,24 +40,15 @@ jobs:
           java-version: "17"
           cache: gradle
 
+      # ANDROID SDK
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          api-level: ${{ env.ANDROID_API }}
 
+      # GRADLE
       - name: Grant execute permission for Gradle wrapper
         run: chmod +x gradlew
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle.properties', 'settings.gradle*') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
+      # ANDROID SDK CACHE
       - name: Cache Android SDK components
         uses: actions/cache@v4
         id: cache-android
@@ -71,24 +65,43 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-android-sdk-
 
+      # INSTALL ANDROID SDK COMPONENTS
       - name: Install Android SDK components
         if: steps.cache-android.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           set -eux
 
-          echo "Android SDK root: $ANDROID_SDK_ROOT"
+          echo "Android SDK root:"
+          echo "$ANDROID_SDK_ROOT"
+
+          echo "Looking for sdkmanager..."
 
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
           if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER=$(which sdkmanager || true)
+            SDKMANAGER="$(command -v sdkmanager || true)"
           fi
 
           if [ -z "${SDKMANAGER:-}" ]; then
-            echo "sdkmanager not found"
+            echo "ERROR: sdkmanager not found"
+            echo
+            echo "Android SDK:"
             ls -la "$ANDROID_SDK_ROOT" || true
+            echo
+            echo "Command line tools:"
+            find "$ANDROID_SDK_ROOT/cmdline-tools" \
+              -maxdepth 3 \
+              -type f \
+              -name sdkmanager \
+              -print 2>/dev/null || true
             exit 1
           fi
+
+          echo "Using sdkmanager:"
+          echo "$SDKMANAGER"
+
+          "$SDKMANAGER" --version
 
           yes | "$SDKMANAGER" \
             "platforms;android-${ANDROID_API}" \
@@ -99,40 +112,65 @@ jobs:
 
           yes | "$SDKMANAGER" --licenses || true
 
+      # SHOW INSTALLED SDK
       - name: Show installed SDK/NDK
+        shell: bash
         run: |
           set -eux
 
-          echo "SDK root: $ANDROID_SDK_ROOT"
+          echo "=========================================="
+          echo "ANDROID SDK"
+          echo "=========================================="
 
+          echo "SDK root:"
+          echo "$ANDROID_SDK_ROOT"
+
+          echo
+          echo "Installed SDK directories:"
           ls -la "$ANDROID_SDK_ROOT" || true
 
-          echo "NDK:"
-          ls -la "$ANDROID_SDK_ROOT/ndk" || true
+          echo
+          echo "Platforms:"
+          ls -la "$ANDROID_SDK_ROOT/platforms" || true
 
+          echo
           echo "Build tools:"
           ls -la "$ANDROID_SDK_ROOT/build-tools" || true
 
+          echo
+          echo "Platform tools:"
+          ls -la "$ANDROID_SDK_ROOT/platform-tools" || true
+
+          echo
+          echo "NDK:"
+          ls -la "$ANDROID_SDK_ROOT/ndk" || true
+
+          echo
+          echo "CMake:"
+          ls -la "$ANDROID_SDK_ROOT/cmake" || true
+
+      # CLEAN
       - name: Clean project
         run: ./gradlew clean --no-daemon
 
-      # ==========================================
       # DEBUG BUILD
-      # ==========================================
-
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
+      # VERIFY DEBUG APK
       - name: Verify debug APK
+        shell: bash
         run: |
           set -eux
 
           echo "Debug APK:"
+
           find app/build/outputs/apk/debug \
             -type f \
             -name "*.apk" \
             -print
 
+      # UPLOAD DEBUG APK
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -140,23 +178,24 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # ==========================================
       # RELEASE BUILD
-      # ==========================================
-
       - name: Build release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
+      # VERIFY RELEASE APK
       - name: Verify release APK
+        shell: bash
         run: |
           set -eux
 
           echo "Release APK:"
+
           find app/build/outputs/apk/release \
             -type f \
             -name "*.apk" \
             -print
 
+      # UPLOAD RELEASE APK
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
@@ -164,10 +203,7 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
-      # ==========================================
       # GITHUB RELEASE
-      # ==========================================
-
       - name: Create GitHub Release
         if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
