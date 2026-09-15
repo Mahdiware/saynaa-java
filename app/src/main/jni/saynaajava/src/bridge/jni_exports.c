@@ -384,6 +384,21 @@ JNIEXPORT jobject JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1objGetattr(
   return resultValue;
 }
 
+JNIEXPORT void JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1setRuntimeError(
+    JNIEnv* env, jobject thiz, jstring message) {
+  VM* vm = vm_from_saynaa(env, thiz);
+  if (vm == NULL || message == NULL)
+    return;
+
+  const char* msgChars = (*env)->GetStringUTFChars(env, message, NULL);
+  if (msgChars == NULL)
+    return;
+
+  SetRuntimeError(vm, msgChars);
+
+  (*env)->ReleaseStringUTFChars(env, message, msgChars);
+}
+
 JNIEXPORT void JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1reserveSlots(
     JNIEnv* env, jobject thiz, jint count) {
   VM* vm = vm_from_saynaa(env, thiz);
@@ -774,7 +789,6 @@ JNIEXPORT jboolean JNICALL Java_com_saynaa_saynaajava_Saynaa_saynaa_1bindJavaObj
   if (bridge == NULL || bridge->jvm == NULL || bridge->clsJavaObject == NULL)
     return JNI_FALSE;
 
-  LOGD("testing the where bug come from");
   JavaRef* ref = make_java_ref(env, bridge->jvm, value);
 
   if (ref == NULL)

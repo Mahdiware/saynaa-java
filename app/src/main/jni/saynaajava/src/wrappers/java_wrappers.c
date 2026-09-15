@@ -386,7 +386,7 @@ void java_class_call(VM* vm) {
       (*env)->ReleaseStringUTFChars(env, classNameObj, clsName);
 
     SetRuntimeError(
-        vm, "JavaClass._call returned null. Check logcat for constructor mismatch or exception.");
+        vm, "JavaClass._call returned null. Possible constructor failure or invalid class. check logcat for details.");
   } else {
     object_to_slot(env, vm, bridge, 0, obj, "Failed to wrap Java result object.");
     (*env)->DeleteLocalRef(env, obj);

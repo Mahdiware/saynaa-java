@@ -3,7 +3,6 @@ package com.saynaa.utils;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.text.TextUtils;
-
 import java.util.Map;
 import java.util.Set;
 
@@ -17,7 +16,6 @@ import java.util.Set;
  * No external dependencies are required.
  */
 public final class Preferences {
-
   private final SharedPreferences preferences;
 
   public Preferences(Context context, String name) {
@@ -26,17 +24,12 @@ public final class Preferences {
     }
 
     if (TextUtils.isEmpty(name)) {
-      throw new IllegalArgumentException(
-        "Preference name cannot be empty"
-      );
+      throw new IllegalArgumentException("Preference name cannot be empty");
     }
 
-    preferences = context.getSharedPreferences(
-      name,
-      Context.MODE_PRIVATE
-    );
+    preferences = context.getSharedPreferences(name, Context.MODE_PRIVATE);
   }
-  
+
   public static Preferences getSharedPreferences(Context context) {
     return new Preferences(context, "saynaa_preferences");
   }
@@ -78,22 +71,16 @@ public final class Preferences {
 
     } else if (value instanceof Set) {
       try {
-        @SuppressWarnings("unchecked")
-        Set<String> values = (Set<String>) value;
+        @SuppressWarnings("unchecked") Set<String> values = (Set<String>) value;
 
         editor.putStringSet(key, values);
 
       } catch (ClassCastException e) {
-        throw new IllegalArgumentException(
-          "Only Set<String> is supported"
-        );
+        throw new IllegalArgumentException("Only Set<String> is supported");
       }
 
     } else {
-      throw new IllegalArgumentException(
-        "Unsupported preference type: "
-          + value.getClass().getName()
-      );
+      throw new IllegalArgumentException("Unsupported preference type: " + value.getClass().getName());
     }
 
     editor.apply();
@@ -203,10 +190,7 @@ public final class Preferences {
     edit().putStringSet(key, values).apply();
   }
 
-  public Set<String> getStringSet(
-    String key,
-    Set<String> defaultValue
-  ) {
+  public Set<String> getStringSet(String key, Set<String> defaultValue) {
     checkKey(key);
     return preferences.getStringSet(key, defaultValue);
   }
@@ -220,17 +204,11 @@ public final class Preferences {
     edit().putEnum(key, value).apply();
   }
 
-  public <T extends Enum<T>> T getEnum(
-    String key,
-    Class<T> enumClass,
-    T defaultValue
-  ) {
+  public <T extends Enum<T>> T getEnum(String key, Class<T> enumClass, T defaultValue) {
     checkKey(key);
 
     if (enumClass == null) {
-      throw new IllegalArgumentException(
-        "Enum class cannot be null"
-      );
+      throw new IllegalArgumentException("Enum class cannot be null");
     }
 
     String name = preferences.getString(key, null);
@@ -250,30 +228,20 @@ public final class Preferences {
      Listeners
      ========================= */
 
-  public void registerListener(
-    SharedPreferences.OnSharedPreferenceChangeListener listener
-  ) {
+  public void registerListener(SharedPreferences.OnSharedPreferenceChangeListener listener) {
     if (listener == null) {
-      throw new IllegalArgumentException(
-        "Listener cannot be null"
-      );
+      throw new IllegalArgumentException("Listener cannot be null");
     }
 
-    preferences.registerOnSharedPreferenceChangeListener(
-      listener
-    );
+    preferences.registerOnSharedPreferenceChangeListener(listener);
   }
 
-  public void unregisterListener(
-    SharedPreferences.OnSharedPreferenceChangeListener listener
-  ) {
+  public void unregisterListener(SharedPreferences.OnSharedPreferenceChangeListener listener) {
     if (listener == null) {
       return;
     }
 
-    preferences.unregisterOnSharedPreferenceChangeListener(
-      listener
-    );
+    preferences.unregisterOnSharedPreferenceChangeListener(listener);
   }
 
   /* =========================
@@ -323,7 +291,6 @@ public final class Preferences {
   }
 
   public static final class Editor {
-
     private final SharedPreferences.Editor editor;
 
     private Editor(SharedPreferences.Editor editor) {
@@ -366,19 +333,13 @@ public final class Preferences {
       return this;
     }
 
-    public Editor putStringSet(
-      String key,
-      Set<String> values
-    ) {
+    public Editor putStringSet(String key, Set<String> values) {
       checkKey(key);
       editor.putStringSet(key, values);
       return this;
     }
 
-    public Editor putEnum(
-      String key,
-      Enum<?> value
-    ) {
+    public Editor putEnum(String key, Enum<?> value) {
       checkKey(key);
 
       if (value == null) {
@@ -416,9 +377,7 @@ public final class Preferences {
 
   private static void checkKey(String key) {
     if (TextUtils.isEmpty(key)) {
-      throw new IllegalArgumentException(
-        "Preference key cannot be empty or null"
-      );
+      throw new IllegalArgumentException("Preference key cannot be empty or null");
     }
   }
 }

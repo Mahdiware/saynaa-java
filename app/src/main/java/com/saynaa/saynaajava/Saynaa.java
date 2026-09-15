@@ -279,6 +279,10 @@ public class Saynaa {
     return new SaynaaMap(this, SLOT_TYPE_MAP, saynaa_newMap());
   }
 
+  // public synchronized void setRuntimeError(String message) {
+  //   saynaa_setRuntimeError(message);
+  // }
+
   public synchronized boolean newInstance(int classHandleId, int argStart, int argCount, int retSlot) {
     return saynaa_newInstance(classHandleId, argStart, argCount, retSlot);
   }
@@ -439,6 +443,7 @@ public class Saynaa {
   private synchronized native void saynaa_addSearchPath(String path);
   private synchronized native int saynaa_newList();
   private synchronized native int saynaa_newMap();
+  private synchronized native void saynaa_setRuntimeError(String message);
   private synchronized native boolean saynaa_isSlotJava(int slot);
   private synchronized native int saynaa_newModule(String name);
   private synchronized native boolean saynaa_callMethod(

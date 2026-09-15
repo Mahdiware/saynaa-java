@@ -11,6 +11,7 @@ View = java.bindClass('android.view.View')
 TextWatcher = java.bindClass('android.text.TextWatcher')
 Runnable = java.bindClass('java.lang.Runnable')
 CodeEditor = java.bindClass('com.saynaa.CodeEditor')
+ArrayPageAdapter = java.bindClass('com.saynaa.adapter.ArrayPageAdapter')
 
 assert(LinearLayout != null, 'Failed to bind LinearLayout')
 assert(TextView != null, 'Failed to bind TextView')
@@ -42,6 +43,17 @@ end
 
 activity.setTitle('Saynaa Demo')
 
+x1 = TextView(activity)
+x2 = EditText(activity)
+x3 = Button(activity)
+
+data = [x1, x2, x3]
+result = ArrayPageAdapter(data)
+
+assert(result.getCount() == 3, "ArrayPageAdapter getCount failed: expected 3, got " .. result.getCount())
+assert(java.equals(result.getItem(0), x1), "ArrayPageAdapter getItem(0) failed: expected $x1, got " .. result.getItem(0))
+assert(java.equals(result.getItem(1), x2), "ArrayPageAdapter getItem(1) failed: expected $x2, got " .. result.getItem(1))
+assert(java.equals(result.getItem(2), x3), "ArrayPageAdapter getItem(2) failed: expected $x3, got " .. result.getItem(2))
 
 # testList = java.new('java.util.ArrayList')
 # testList.add('a')

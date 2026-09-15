@@ -64,8 +64,8 @@ function benchmark(name, func)
         times[i] = (t1 - t0) * 1000
     end
 
-    min = times[1]
-    max = times[1]
+    min = times[0]
+    max = times[0]
     total = 0
 
     for i in 0..1000 do
@@ -84,8 +84,9 @@ function benchmark(name, func)
 
     print("")
     print("=== " .. name .. " ===")
-    print("First:   " .. times[1] .. " ms")
-    print("Second:  " .. times[2] .. " ms")
+    print("First:   " .. times[0] .. " ms")
+    print("Second:  " .. times[1] .. " ms")
+    print("last:    " .. times[999] .. " ms")
     print("Min:     " .. min .. " ms")
     print("Max:     " .. max .. " ms")
     print("Average: " .. (total / 1000) .. " ms")

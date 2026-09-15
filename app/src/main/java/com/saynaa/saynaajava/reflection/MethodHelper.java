@@ -29,10 +29,11 @@ public class MethodHelper {
       return null;
     }
     try {
-      Object[] coercedArgs = method.isVarArgs()
-                                 ? JavaBridge.buildVarArgs(method.getParameterTypes(), normalized)
-                                 : JavaBridge.coerceArgs(method.getParameterTypes(), normalized);
-      Object result = method.invoke(null, coercedArgs);
+      Object[] finalArgs = ReflectionNormalizer.normalizeMethodArgs(method, normalized);
+
+      if (finalArgs == null)
+        return null;
+      Object result = method.invoke(null, finalArgs);
       return result;
     } catch (IllegalAccessException | InvocationTargetException | IllegalArgumentException e) {
       Log.e(TAG, "Failed to invoke static method: " + method, e);
@@ -53,10 +54,11 @@ public class MethodHelper {
       return null;
     }
     try {
-      Object[] coercedArgs = method.isVarArgs()
-                                 ? JavaBridge.buildVarArgs(method.getParameterTypes(), normalized)
-                                 : JavaBridge.coerceArgs(method.getParameterTypes(), normalized);
-      Object result = method.invoke(instance, coercedArgs);
+      Object[] finalArgs = ReflectionNormalizer.normalizeMethodArgs(method, normalized);
+
+      if (finalArgs == null)
+        return null;
+      Object result = method.invoke(instance, finalArgs);
       return result;
 
     } catch (IllegalAccessException | InvocationTargetException | IllegalArgumentException e) {

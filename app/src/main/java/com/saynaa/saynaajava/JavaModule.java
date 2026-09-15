@@ -42,6 +42,7 @@ public class JavaModule {
       module.setGlobal("getClassName", this, "getClassName");
       module.setGlobal("getPackageName", this, "getPackageName");
       module.setGlobal("getSimpleClassName", this, "getSimpleClassName");
+      module.setGlobal("equals", this, "equals");
       module.setGlobal("setDebugMode", this, "setDebugMode");
       module.register();
     } catch (Exception e) {
@@ -52,6 +53,14 @@ public class JavaModule {
 
   public void setDebugMode(boolean mode) {
     saynaa.setDebugMode(mode);
+  }
+
+  public boolean equals(Object a, Object b) {
+    if (a == null && b == null)
+      return true;
+    if (a == null || b == null)
+      return false;
+    return a.equals(b);
   }
 
   public void toast(String msg) {

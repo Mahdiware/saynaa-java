@@ -9,8 +9,4 @@ public interface SaynaaContext {
   public void sendMsg(String msg);
 
   public void sendError(String title, Exception msg);
-
-  public Object getSharedData(String key);
-  public Object getSharedData(String key, Object def);
-  public boolean setSharedData(String key, Object value);
 }
