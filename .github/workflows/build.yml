@@ -43,6 +43,8 @@ jobs:
       # ANDROID SDK
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'cmdline-tools;latest' # FIX: Overrides the default 'tools' package which is deprecated
 
       # GRADLE
       - name: Grant execute permission for Gradle wrapper
