@@ -43,15 +43,12 @@ jobs:
       # ANDROID SDK
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'cmdline-tools;latest'
 
       # GRADLE
       - name: Grant execute permission for Gradle wrapper
         run: chmod +x gradlew
 
       # INSTALL ANDROID SDK COMPONENTS
-      # The cache step has been removed to prevent state corruption.
       - name: Install Android SDK components
         shell: bash
         run: |
@@ -59,8 +56,6 @@ jobs:
 
           echo "Android SDK root:"
           echo "$ANDROID_SDK_ROOT"
-
-          echo "Looking for sdkmanager..."
 
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
@@ -76,16 +71,16 @@ jobs:
           echo "Using sdkmanager:"
           echo "$SDKMANAGER"
 
-          "$SDKMANAGER" --version
+          # Accept all licenses first to prevent interactive prompts
+          yes | "$SDKMANAGER" --licenses || true
 
-          yes | "$SDKMANAGER" \
+          # Install components without piping 'yes' to prevent broken pipe errors
+          "$SDKMANAGER" \
             "platforms;android-${ANDROID_API}" \
             "build-tools;${BUILD_TOOLS_VERSION}" \
             "platform-tools" \
             "ndk;${NDK_VERSION}" \
             "cmake;${CMAKE_VERSION}"
-
-          yes | "$SDKMANAGER" --licenses || true
 
       # SHOW INSTALLED SDK
       - name: Show installed SDK/NDK
