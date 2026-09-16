@@ -2,6 +2,7 @@ package com.saynaa.adapter;
 
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import com.saynaa.saynaajava.datatype.SaynaaList;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -18,8 +19,6 @@ public class ArrayPageAdapter extends BasePageAdapter {
     this.mListViews = new ArrayList<>(views);
   }
 
-
-
   public ArrayPageAdapter(View[] views) {
     this.mListViews = new ArrayList<>(Arrays.asList(views));
   }
@@ -33,13 +32,18 @@ public class ArrayPageAdapter extends BasePageAdapter {
   public Object instantiateItem(ViewGroup container, int position) {
     View view = mListViews.get(position);
 
-    // FIX: Prevent "IllegalStateException: The specified child already has a parent"
-    // if a view is quickly removed and added back.
     if (view.getParent() != null) {
-      ((ViewGroup) view.getParent()).removeView(view);
+      ViewParent parent = view.getParent();
+
+      if (parent instanceof ViewGroup && parent != container) {
+        ((ViewGroup) parent).removeView(view);
+      }
     }
 
-    container.addView(view);
+    if (view.getParent() == null) {
+      container.addView(view);
+    }
+
     return view;
   }
 

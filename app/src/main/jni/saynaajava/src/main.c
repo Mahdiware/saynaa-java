@@ -276,7 +276,9 @@ static bool execute_callback_core(VM* vm, CallbackEntry* entry, const char* runt
   if (entry->fnHandle != NULL) {
     int fnSlot = nextSlot(vm, false);
     setSlotHandle(vm, fnSlot, entry->fnHandle);
-    return CallFunction(vm, fnSlot, argCount, argStart, resultSlot);
+    bool ok = CallFunction(vm, fnSlot, argCount, argStart, resultSlot);
+    freeSlot(vm, fnSlot, 1);
+    return ok;
   }
 
   if (entry->mapHandle != NULL) {
@@ -298,6 +300,10 @@ static bool execute_callback_core(VM* vm, CallbackEntry* entry, const char* runt
     if (CallMethod(vm, mapSlot, "get", 1, keySlot, fnSlot) && GetSlotType(vm, fnSlot) == vCLOSURE) {
       return CallFunction(vm, fnSlot, argCount, argStart, resultSlot);
     }
+
+    freeSlot(vm, keySlot, 1);
+    freeSlot(vm, fnSlot, 1);
+    freeSlot(vm, mapSlot, 1);
     // Missing callback in map is intentionally treated as an allowed no-op
     return true;
   }
@@ -359,6 +365,7 @@ bool invoke_registered_callback_from_slots(JNIEnv* env, VM* vm, BridgeState* bri
   if (ok && outResult != NULL && resultSlot > 0) {
     *outResult = slot_to_java(env, vm, bridge, resultSlot);
   }
+  freeSlot(vm, resultSlot, 1);
 
   return ok;
 }

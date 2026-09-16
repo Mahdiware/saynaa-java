@@ -367,6 +367,7 @@ public final class JavaBridge {
     } else if (Map.class.isAssignableFrom(cls)) {
       HashMap<Object, Object> map = new HashMap<>();
 
+      Log.d(TAG, "createFromSlots: creating map");
       if (argc >= 2 && saynaa.getSlotType(valueSlot) == Saynaa.SLOT_TYPE_MAP) {
         Object value = slotToJava(saynaa, valueSlot);
         Map<?, ?> values = ReflectionNormalizer.toMap(value);

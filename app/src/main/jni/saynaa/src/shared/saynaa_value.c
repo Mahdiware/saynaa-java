@@ -2129,7 +2129,12 @@ VarType getVarType(Var v) {
     return vNUMBER;
 
   ASSERT(IS_OBJ(v), OOPS);
+
   Object* obj = AS_OBJ(v);
+  if (obj == NULL) {
+    ASSERT(false, OOPS);
+    return vNULL;
+  }
   return getObjVarType(obj->type);
 }
 
