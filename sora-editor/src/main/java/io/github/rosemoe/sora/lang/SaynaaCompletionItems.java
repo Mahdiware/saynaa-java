@@ -1,4 +1,4 @@
-package io.github.rosemoe.sora.custom.lang;
+package io.github.rosemoe.sora.lang;
 
 public final class SaynaaCompletionItems {
   public static final String[] KEYWORDS = {"if", "elif", "else", "class", "import", "from",

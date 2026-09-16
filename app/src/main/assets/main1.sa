@@ -10,7 +10,7 @@ Bundle = java.bindClass('android.os.Bundle')
 View = java.bindClass('android.view.View')
 TextWatcher = java.bindClass('android.text.TextWatcher')
 Runnable = java.bindClass('java.lang.Runnable')
-CodeEditor = java.bindClass('com.saynaa.CodeEditor')
+CodeEditor = java.bindClass('io.github.rosemoe.sora.CodeEditor')
 ArrayPageAdapter = java.bindClass('com.saynaa.adapter.ArrayPageAdapter')
 FloatingEditText = java.bindClass('com.saynaa.view.FloatingEditText')
 

@@ -1,4 +1,4 @@
-package io.github.rosemoe.sora.custom.lang;
+package io.github.rosemoe.sora.lang;
 
 import android.os.Bundle;
 import androidx.annotation.NonNull;
