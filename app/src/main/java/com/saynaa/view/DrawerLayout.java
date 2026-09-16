@@ -1653,16 +1653,21 @@ public class DrawerLayout extends ViewGroup implements DrawerLayoutImpl {
 
   @Override
   protected void onRestoreInstanceState(Parcelable state) {
+    if (!(state instanceof SavedState)) {
+      super.onRestoreInstanceState(state);
+      return;
+    }
+  
     final SavedState ss = (SavedState) state;
     super.onRestoreInstanceState(ss.getSuperState());
-
+  
     if (ss.openDrawerGravity != Gravity.NO_GRAVITY) {
       final View toOpen = findDrawerWithGravity(ss.openDrawerGravity);
       if (toOpen != null) {
         openDrawer(toOpen);
       }
     }
-
+  
     setDrawerLockMode(ss.lockModeLeft, Gravity.LEFT);
     setDrawerLockMode(ss.lockModeRight, Gravity.RIGHT);
   }
