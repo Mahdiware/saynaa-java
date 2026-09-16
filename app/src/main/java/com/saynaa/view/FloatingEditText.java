@@ -10,8 +10,11 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.text.Editable;
+import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.text.method.HideReturnsTransformationMethod;
+import android.text.method.PasswordTransformationMethod;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -24,13 +27,19 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 public class FloatingEditText extends FrameLayout {
+  public static final int END_ICON_NONE = 0;
+  public static final int END_ICON_CLEAR = 1;
+  public static final int END_ICON_PASSWORD_TOGGLE = 2;
+  public static final int END_ICON_CUSTOM = 3;
+
   private OutlineField fieldContainer;
   private EditText editText;
   private TextView label;
-  private TextView errorText;
-  private ImageView errorIcon;
+  private TextView helperTextView;
+  private ImageView endIconView;
 
   private String hint = "";
+  private String helperText = "";
 
   private int normalColor;
   private int focusColor;
@@ -39,20 +48,20 @@ public class FloatingEditText extends FrameLayout {
   private int backgroundColor;
 
   private float cornerRadius = 8f;
-
-  private int fieldHeight = 56;
+  private int defaultFieldHeight = 52;
+  private final int TOP_LABEL_MARGIN = 14; // Space for floating label floating outside outline
 
   private boolean hasError;
   private boolean enabled = true;
+  private int endIconMode = END_ICON_NONE;
+  private boolean isPasswordShowing = false;
 
-  private float labelProgress;
-
+  private float labelProgress = 0f;
   private ValueAnimator labelAnimator;
   private ValueAnimator errorAnimator;
 
-  private int horizontalPadding = 14;
+  private int horizontalPadding = 12;
 
-  // Constructors
   public FloatingEditText(Context context) {
     this(context, null);
   }
@@ -71,46 +80,27 @@ public class FloatingEditText extends FrameLayout {
     init(context);
   }
 
-  // Theme colors
   private void initThemeColors() {
     backgroundColor = Color.TRANSPARENT;
-    /* getThemeColor(
-         android.R.attr.colorBackground
-     );*/
-
     normalColor = getThemeColor(android.R.attr.textColorSecondary);
-
     focusColor = getThemeColor(android.R.attr.colorAccent);
-
     disabledColor = getThemeColor(android.R.attr.textColorTertiary);
 
-    /*   if (backgroundColor == Color.TRANSPARENT) {
-           backgroundColor = Color.WHITE;
-       }*/
-
-    if (normalColor == Color.TRANSPARENT) {
+    if (normalColor == Color.TRANSPARENT)
       normalColor = Color.GRAY;
-    }
-
-    if (focusColor == Color.TRANSPARENT) {
+    if (focusColor == Color.TRANSPARENT)
       focusColor = normalColor;
-    }
-
-    if (disabledColor == Color.TRANSPARENT) {
+    if (disabledColor == Color.TRANSPARENT)
       disabledColor = normalColor;
-    }
 
     errorColor = Color.rgb(211, 47, 47);
   }
 
   private int getThemeColor(int attribute) {
     TypedValue value = new TypedValue();
-
     boolean found = getContext().getTheme().resolveAttribute(attribute, value, true);
-
-    if (!found) {
+    if (!found)
       return Color.TRANSPARENT;
-    }
 
     if (value.type >= TypedValue.TYPE_FIRST_COLOR_INT && value.type <= TypedValue.TYPE_LAST_COLOR_INT) {
       return value.data;
@@ -120,299 +110,285 @@ public class FloatingEditText extends FrameLayout {
       try {
         if (android.os.Build.VERSION.SDK_INT >= 23) {
           return getResources().getColor(value.resourceId, getContext().getTheme());
-
         } else {
           return getResources().getColor(value.resourceId);
         }
-
       } catch (Exception ignored) {
       }
     }
-
     return Color.TRANSPARENT;
   }
 
-  // Initialize
   private void init(Context context) {
-    // ----------------------------------------------
-    // Field container
-    // ----------------------------------------------
-
     fieldContainer = new OutlineField(context);
+    fieldContainer.setClipChildren(false);
+    fieldContainer.setClipToPadding(false);
 
-    LayoutParams fieldParams = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(fieldHeight + 8));
-
+    LayoutParams fieldParams = new LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+    fieldParams.topMargin = dp(TOP_LABEL_MARGIN);
     addView(fieldContainer, fieldParams);
 
-    // ----------------------------------------------
-    // EditText
-    // ----------------------------------------------
-
+    // Native EditText
     editText = new EditText(context);
-
     editText.setSingleLine(true);
-
-    editText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-
+    editText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
     editText.setGravity(Gravity.CENTER_VERTICAL);
-
-    /*
-     * Remove Android's default background.
-     * The parent draws the outline.
-     */
     editText.setBackgroundColor(Color.TRANSPARENT);
+    editText.setPadding(dp(horizontalPadding), 0, dp(horizontalPadding + 32), 0);
 
-    /*
-     * Leave space for the error icon.
-     */
-    editText.setPadding(dp(horizontalPadding), 0, dp(horizontalPadding + 28), 0);
-
-    LayoutParams editParams = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(fieldHeight));
-
-    editParams.topMargin = dp(8);
-
+    LayoutParams editParams = new LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
     fieldContainer.addView(editText, editParams);
 
-    // ----------------------------------------------
-    // Floating label
-    // ----------------------------------------------
-
+    // Floating Label Text
     label = new TextView(context);
-
-    label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-
+    label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
     label.setSingleLine(true);
-
     label.setGravity(Gravity.CENTER_VERTICAL);
-
     label.setTypeface(Typeface.DEFAULT);
-
     label.setBackgroundColor(Color.TRANSPARENT);
 
-    label.setVisibility(VISIBLE);
-
-    LayoutParams labelParams = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(20));
-
-    labelParams.leftMargin = dp(10);
-
-    labelParams.topMargin = 0;
-
+    LayoutParams labelParams = new LayoutParams(
+        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    labelParams.leftMargin = dp(horizontalPadding);
     fieldContainer.addView(label, labelParams);
+    label.bringToFront();
 
-    // ----------------------------------------------
-    // Error icon
-    // ----------------------------------------------
+    // End Action Icon
+    endIconView = new ImageView(context);
+    endIconView.setScaleType(ImageView.ScaleType.CENTER);
+    endIconView.setVisibility(GONE);
 
-    errorIcon = new ImageView(context);
+    LayoutParams iconParams = new LayoutParams(dp(36), ViewGroup.LayoutParams.MATCH_PARENT);
+    iconParams.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+    fieldContainer.addView(endIconView, iconParams);
 
-    errorIcon.setScaleType(ImageView.ScaleType.CENTER);
+    // Helper & Error Subtext
+    helperTextView = new TextView(context);
+    helperTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+    helperTextView.setGravity(Gravity.TOP);
+    helperTextView.setPadding(dp(horizontalPadding), dp(4), dp(horizontalPadding), 0);
+    helperTextView.setVisibility(GONE);
 
-    errorIcon.setClickable(false);
-    errorIcon.setFocusable(false);
-
-    errorIcon.setVisibility(GONE);
-
-    LayoutParams iconParams = new LayoutParams(dp(28), dp(fieldHeight));
-
-    iconParams.gravity = Gravity.RIGHT;
-
-    iconParams.topMargin = dp(8);
-
-    fieldContainer.addView(errorIcon, iconParams);
-
-    // ----------------------------------------------
-    // Error text
-    // ----------------------------------------------
-
-    errorText = new TextView(context);
-
-    errorText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-
-    errorText.setTextColor(errorColor);
-
-    errorText.setGravity(Gravity.TOP);
-
-    errorText.setPadding(dp(horizontalPadding), dp(4), dp(horizontalPadding), 0);
-
-    errorText.setVisibility(GONE);
-
-    LayoutParams errorParams = new LayoutParams(
+    LayoutParams helperParams = new LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    addView(helperTextView, helperParams);
 
-    addView(errorText, errorParams);
-
-    // ----------------------------------------------
     // Listeners
-    // ----------------------------------------------
-
-    editText.setOnFocusChangeListener(new OnFocusChangeListener() {
-      @Override
-      public void onFocusChange(View view, boolean focused) {
-        updateState(true);
-      }
-    });
+    editText.setOnFocusChangeListener((view, focused) -> updateState(true));
 
     editText.addTextChangedListener(new TextWatcher() {
       @Override
       public void beforeTextChanged(CharSequence s, int start, int count, int after) {
       }
-
       @Override
       public void onTextChanged(CharSequence s, int start, int before, int count) {
         updateState(true);
+        updateEndIconVisibility();
       }
-
       @Override
       public void afterTextChanged(Editable editable) {
       }
     });
 
-    fieldContainer.setOnClickListener(new OnClickListener() {
-      @Override
-      public void onClick(View v) {
-        if (editText.isEnabled()) {
-          editText.requestFocus();
-
-          editText.setSelection(editText.length());
-        }
+    fieldContainer.setOnClickListener(v -> {
+      if (editText.isEnabled()) {
+        editText.requestFocus();
+        editText.setSelection(editText.length());
       }
     });
+
+    endIconView.setOnClickListener(v -> handleEndIconClick());
 
     updateState(false);
   }
 
-  // State
+  // --- State & Color Management ---
+
   private void updateState(boolean animate) {
     boolean floating = editText.hasFocus() || editText.length() > 0;
-
     float target = floating ? 1f : 0f;
 
     animateLabel(target, animate);
-
-    fieldContainer.invalidate();
-
     updateColors();
   }
 
   private void updateColors() {
-    int borderColor;
+    int activeColor = !enabled ? disabledColor
+                               : (hasError ? errorColor : (editText.hasFocus() ? focusColor : normalColor));
 
-    if (!enabled) {
-      borderColor = disabledColor;
-
-    } else if (hasError) {
-      borderColor = errorColor;
-
-    } else if (editText.hasFocus()) {
-      borderColor = focusColor;
-
-    } else {
-      borderColor = normalColor;
-    }
-
-    fieldContainer.setBorderColor(borderColor);
-
+    fieldContainer.setBorderColor(activeColor);
     fieldContainer.setBorderWidth(editText.hasFocus() ? dp(2) : dp(1));
+    label.setTextColor(activeColor);
 
-    int labelColor;
-
-    if (!enabled) {
-      labelColor = disabledColor;
-
-    } else if (hasError) {
-      labelColor = errorColor;
-
-    } else if (editText.hasFocus()) {
-      labelColor = focusColor;
-
+    if (hasError) {
+      helperTextView.setTextColor(errorColor);
     } else {
-      labelColor = normalColor;
+      helperTextView.setTextColor(normalColor);
     }
-
-    label.setTextColor(labelColor);
   }
 
-  // Floating label animation
   private void animateLabel(float target, boolean animate) {
-    if (labelAnimator != null) {
+    if (labelAnimator != null)
       labelAnimator.cancel();
-    }
 
     if (!animate) {
       labelProgress = target;
-
       applyLabelProgress();
-
       return;
     }
 
     labelAnimator = ValueAnimator.ofFloat(labelProgress, target);
-
-    labelAnimator.setDuration(180);
-
+    labelAnimator.setDuration(160);
     labelAnimator.setInterpolator(new DecelerateInterpolator());
-
-    labelAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-      @Override
-      public void onAnimationUpdate(ValueAnimator animation) {
-        labelProgress = (Float) animation.getAnimatedValue();
-
-        applyLabelProgress();
-      }
+    labelAnimator.addUpdateListener(animation -> {
+      labelProgress = (Float) animation.getAnimatedValue();
+      applyLabelProgress();
     });
-
     labelAnimator.start();
   }
 
   private void applyLabelProgress() {
-    /*
-     * Center position:
-     *
-     * approximately inside the field.
-     */
-    float centerY = dp(28);
+    float containerHeight = fieldContainer.getHeight() > 0 ? fieldContainer.getHeight() : dp(defaultFieldHeight);
+    float labelHeight = label.getMeasuredHeight() > 0 ? label.getMeasuredHeight() : dp(16);
 
-    /*
-     * Floating position:
-     *
-     * centered over the top border.
-     */
-    float floatingY = dp(-1);
+    float centerY = (containerHeight / 2f) - (labelHeight / 2f);
+    float floatingY = -(labelHeight / 2f);
 
     float y = centerY + (floatingY - centerY) * labelProgress;
-
     label.setTranslationY(y);
 
-    /*
-     * Slight scale transition.
-     */
-    float scale = 1f - 0.02f * labelProgress;
-
+    float scale = 1f - 0.22f * labelProgress;
     label.setScaleX(scale);
-
     label.setScaleY(scale);
+
+    label.setPivotX(0);
+    label.setPivotY(labelHeight / 2f);
 
     fieldContainer.invalidate();
   }
 
-  // Hint
-  public void setHint(String text) {
-    if (text == null) {
-      text = "";
+  // --- End Icon Functionality ---
+
+  public void setEndIconMode(int mode) {
+    this.endIconMode = mode;
+    updateEndIconVisibility();
+  }
+
+  private void updateEndIconVisibility() {
+    if (!enabled) {
+      endIconView.setVisibility(GONE);
+      return;
     }
 
-    hint = text;
+    if (hasError) {
+      endIconView.setImageDrawable(new ErrorIconDrawable(errorColor));
+      endIconView.setVisibility(VISIBLE);
+      endIconView.setClickable(false);
+      return;
+    }
 
-    label.setText(text);
+    switch (endIconMode) {
+    case END_ICON_CLEAR:
+      endIconView.setImageDrawable(new ClearIconDrawable(normalColor));
+      endIconView.setVisibility(editText.length() > 0 ? VISIBLE : GONE);
+      endIconView.setClickable(true);
+      break;
 
-    /*
-     * Hint remains visible while the label is
-     * not floating.
-     */
-    /* editText.setHint(
-         text
-     );*/
+    case END_ICON_PASSWORD_TOGGLE:
+      endIconView.setImageDrawable(new EyeIconDrawable(normalColor, isPasswordShowing));
+      endIconView.setVisibility(VISIBLE);
+      endIconView.setClickable(true);
+      break;
 
+    case END_ICON_CUSTOM:
+      endIconView.setVisibility(VISIBLE);
+      endIconView.setClickable(true);
+      break;
+
+    case END_ICON_NONE:
+    default:
+      endIconView.setVisibility(GONE);
+      break;
+    }
+  }
+
+  private void handleEndIconClick() {
+    if (hasError)
+      return;
+
+    if (endIconMode == END_ICON_CLEAR) {
+      editText.setText("");
+    } else if (endIconMode == END_ICON_PASSWORD_TOGGLE) {
+      int selectionStart = editText.getSelectionStart();
+      int selectionEnd = editText.getSelectionEnd();
+
+      isPasswordShowing = !isPasswordShowing;
+      if (isPasswordShowing) {
+        editText.setTransformationMethod(HideReturnsTransformationMethod.getInstance());
+      } else {
+        editText.setTransformationMethod(PasswordTransformationMethod.getInstance());
+      }
+
+      editText.setSelection(selectionStart, selectionEnd);
+      updateEndIconVisibility();
+    }
+  }
+
+  public void setEndIconDrawable(Drawable drawable) {
+    endIconMode = END_ICON_CUSTOM;
+    endIconView.setImageDrawable(drawable);
+    endIconView.setVisibility(VISIBLE);
+  }
+
+  public void setEndIconOnClickListener(OnClickListener listener) {
+    endIconView.setOnClickListener(v -> {
+      if (!hasError && listener != null) {
+        listener.onClick(v);
+      }
+    });
+  }
+
+  // --- TextWatcher & Forwarding Delegation ---
+
+  public void addTextChangedListener(TextWatcher watcher) {
+    if (editText != null)
+      editText.addTextChangedListener(watcher);
+  }
+
+  public void removeTextChangedListener(TextWatcher watcher) {
+    if (editText != null)
+      editText.removeTextChangedListener(watcher);
+  }
+
+  public void setOnEditorActionListener(TextView.OnEditorActionListener listener) {
+    editText.setOnEditorActionListener(listener);
+  }
+
+  public void setFilters(InputFilter[] filters) {
+    editText.setFilters(filters);
+  }
+
+  public void setMaxLength(int maxLength) {
+    editText.setFilters(new InputFilter[] {new InputFilter.LengthFilter(maxLength)});
+  }
+
+  public void setSelection(int index) {
+    editText.setSelection(index);
+  }
+  public void setSelection(int start, int stop) {
+    editText.setSelection(start, stop);
+  }
+  public void selectAll() {
+    editText.selectAll();
+  }
+
+  // --- Getter & Setter API ---
+
+  public void setHint(String text) {
+    hint = text == null ? "" : text;
+    label.setText(hint);
     updateState(false);
   }
 
@@ -420,16 +396,9 @@ public class FloatingEditText extends FrameLayout {
     return hint;
   }
 
-  // Text
   public void setText(String text) {
-    if (text == null) {
-      text = "";
-    }
-
-    editText.setText(text);
-
+    editText.setText(text == null ? "" : text);
     editText.setSelection(editText.length());
-
     updateState(false);
   }
 
@@ -441,31 +410,42 @@ public class FloatingEditText extends FrameLayout {
     return editText;
   }
 
-  // Error
-  public void setError(String message) {
-    if (message == null || message.length() == 0) {
-      clearError();
+  public void setHelperText(String message) {
+    this.helperText = message == null ? "" : message;
+    if (!hasError) {
+      if (helperText.isEmpty()) {
+        helperTextView.setVisibility(GONE);
+      } else {
+        helperTextView.setText(helperText);
+        helperTextView.setVisibility(VISIBLE);
+      }
+      updateColors();
+      requestLayout();
+    }
+  }
 
+  public void setError(String message) {
+    if (message == null || message.isEmpty()) {
+      clearError();
       return;
     }
-
     hasError = true;
-
-    errorText.setText(message);
-
-    errorIcon.setImageDrawable(new ErrorIconDrawable(errorColor));
-
+    helperTextView.setText(message);
     updateColors();
-
+    updateEndIconVisibility();
     animateError(true);
   }
 
   public void clearError() {
     hasError = false;
-
     animateError(false);
-
     updateColors();
+    updateEndIconVisibility();
+
+    if (!helperText.isEmpty()) {
+      helperTextView.setText(helperText);
+      helperTextView.setVisibility(VISIBLE);
+    }
   }
 
   public boolean hasError() {
@@ -473,118 +453,88 @@ public class FloatingEditText extends FrameLayout {
   }
 
   private void animateError(boolean show) {
-    if (errorAnimator != null) {
+    if (errorAnimator != null)
       errorAnimator.cancel();
-    }
 
-    if (show) {
-      errorText.setVisibility(VISIBLE);
+    if (show)
+      helperTextView.setVisibility(VISIBLE);
 
-      errorIcon.setVisibility(VISIBLE);
-
-      errorText.setAlpha(0f);
-
-      errorIcon.setAlpha(0f);
-
-      errorAnimator = ValueAnimator.ofFloat(0f, 1f);
-
-    } else {
-      errorAnimator = ValueAnimator.ofFloat(1f, 0f);
-    }
-
+    errorAnimator = ValueAnimator.ofFloat(show ? 0f : 1f, show ? 1f : 0f);
     errorAnimator.setDuration(150);
-
     errorAnimator.setInterpolator(new DecelerateInterpolator());
-
-    errorAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-      @Override
-      public void onAnimationUpdate(ValueAnimator animation) {
-        float value = (Float) animation.getAnimatedValue();
-
-        errorText.setAlpha(value);
-
-        errorIcon.setAlpha(value);
-      }
+    errorAnimator.addUpdateListener(animation -> {
+      float value = (Float) animation.getAnimatedValue();
+      helperTextView.setAlpha(value);
     });
-
     errorAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
       @Override
       public void onAnimationEnd(android.animation.Animator animation) {
-        if (!hasError) {
-          errorText.setVisibility(GONE);
-
-          errorIcon.setVisibility(GONE);
+        if (!hasError && helperText.isEmpty()) {
+          helperTextView.setVisibility(GONE);
         }
-
         requestLayout();
       }
     });
-
     errorAnimator.start();
-
     requestLayout();
+  }
+
+  public void setInputType(int type) {
+    editText.setInputType(type);
+    if ((type & InputType.TYPE_TEXT_VARIATION_PASSWORD) == InputType.TYPE_TEXT_VARIATION_PASSWORD
+        || (type & InputType.TYPE_NUMBER_VARIATION_PASSWORD) == InputType.TYPE_NUMBER_VARIATION_PASSWORD) {
+      setEndIconMode(END_ICON_PASSWORD_TOGGLE);
+    }
+  }
+
+  public int getInputType() {
+    return editText.getInputType();
+  }
+  public void setSingleLine(boolean value) {
+    editText.setSingleLine(value);
+  }
+  public void setTextSize(float size) {
+    editText.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
   }
 
   public void setErrorColor(int color) {
     errorColor = color;
-
-    errorText.setTextColor(color);
-
-    errorIcon.setImageDrawable(new ErrorIconDrawable(color));
-
     updateColors();
   }
-
-  // Colors
   public void setFocusColor(int color) {
     focusColor = color;
-
     updateColors();
   }
-
   public void setNormalColor(int color) {
     normalColor = color;
-
     updateColors();
   }
-
   public void setDisabledColor(int color) {
     disabledColor = color;
-
     updateColors();
   }
 
   public void setFieldBackground(int color) {
     backgroundColor = color;
-
     fieldContainer.setBackgroundColor(color);
-
     updateColors();
   }
 
-  // Radius
   public void setCornerRadius(float radius) {
     cornerRadius = radius;
-
     fieldContainer.invalidate();
   }
 
-  // Enabled
   @Override
   public void setEnabled(boolean enabled) {
     super.setEnabled(enabled);
-
     this.enabled = enabled;
-
-    if (editText != null) {
+    if (editText != null)
       editText.setEnabled(enabled);
-    }
-
-    if (!enabled) {
+    if (!enabled)
       editText.clearFocus();
-    }
-
     updateColors();
+    updateEndIconVisibility();
   }
 
   @Override
@@ -592,100 +542,96 @@ public class FloatingEditText extends FrameLayout {
     return enabled;
   }
 
-  // Input
-  public void setInputType(int type) {
-    editText.setInputType(type);
+  @Override
+  public boolean requestFocus(int direction, android.graphics.Rect previouslyFocusedRect) {
+    return editText != null ? editText.requestFocus(direction, previouslyFocusedRect)
+                            : super.requestFocus(direction, previouslyFocusedRect);
   }
 
-  public int getInputType() {
-    return editText.getInputType();
+  @Override
+  public void clearFocus() {
+    if (editText != null)
+      editText.clearFocus();
+    else
+      super.clearFocus();
   }
 
-  public void setSingleLine(boolean value) {
-    editText.setSingleLine(value);
-  }
+  // --- Layout & Measurement ---
 
-  public void setTextSize(float size) {
-    editText.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
-  }
-
-  // Measurement
   @Override
   protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
     int width = MeasureSpec.getSize(widthMeasureSpec);
-
-    int fieldHeightTotal = dp(fieldHeight + 8);
-
-    fieldContainer.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-        MeasureSpec.makeMeasureSpec(fieldHeightTotal, MeasureSpec.EXACTLY));
-
-    int desiredHeight = fieldHeightTotal;
-
-    if (hasError && errorText.getVisibility() != GONE) {
-      errorText.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-          MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
-
-      desiredHeight += errorText.getMeasuredHeight() + dp(4);
-    }
-
     int mode = MeasureSpec.getMode(heightMeasureSpec);
+    int specSize = MeasureSpec.getSize(heightMeasureSpec);
+
+    int topMargin = dp(TOP_LABEL_MARGIN);
+    int desiredFieldHeight = dp(defaultFieldHeight);
 
     if (mode == MeasureSpec.EXACTLY) {
-      desiredHeight = MeasureSpec.getSize(heightMeasureSpec);
-
+      desiredFieldHeight = Math.max(dp(32), specSize - topMargin);
     } else if (mode == MeasureSpec.AT_MOST) {
-      desiredHeight = Math.min(desiredHeight, MeasureSpec.getSize(heightMeasureSpec));
+      desiredFieldHeight = Math.min(desiredFieldHeight, specSize - topMargin);
     }
 
-    setMeasuredDimension(width, desiredHeight);
+    int totalHeight = desiredFieldHeight + topMargin;
+
+    if (helperTextView.getVisibility() != GONE) {
+      helperTextView.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+          MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+      totalHeight += helperTextView.getMeasuredHeight() + dp(4);
+    }
+
+    fieldContainer.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+        MeasureSpec.makeMeasureSpec(desiredFieldHeight, MeasureSpec.EXACTLY));
+
+    setMeasuredDimension(width, totalHeight);
   }
 
-  // Layout
   @Override
   protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-    fieldContainer.layout(0, 0, getMeasuredWidth(), dp(fieldHeight + 8));
+    int topMargin = dp(TOP_LABEL_MARGIN);
+    int fieldHeight = fieldContainer.getMeasuredHeight();
 
-    if (errorText.getVisibility() != GONE) {
-      int topPosition = dp(fieldHeight + 12);
+    fieldContainer.layout(0, topMargin, getMeasuredWidth(), topMargin + fieldHeight);
 
-      errorText.layout(0, topPosition, getMeasuredWidth(), topPosition + errorText.getMeasuredHeight());
+    if (helperTextView.getVisibility() != GONE) {
+      int topPosition = topMargin + fieldHeight + dp(2);
+      helperTextView.layout(
+          0, topPosition, getMeasuredWidth(), topPosition + helperTextView.getMeasuredHeight());
     }
+
+    applyLabelProgress();
   }
 
-  // dp
   private int dp(float value) {
     return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
   }
 
-  // Custom outline field
+  // --- Inner View: Custom Outline Canvas Drawing ---
+
   private class OutlineField extends FrameLayout {
-    private Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
+    private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private int borderColor = normalColor;
-
     private float borderWidth = dp(1);
+
+    private final RectF rect = new RectF();
+    private final Path path = new Path();
 
     public OutlineField(Context context) {
       super(context);
-
       setWillNotDraw(false);
-
       setBackgroundColor(backgroundColor);
-
       borderPaint.setStyle(Paint.Style.STROKE);
-
       borderPaint.setStrokeCap(Paint.Cap.ROUND);
     }
 
     public void setBorderColor(int color) {
       borderColor = color;
-
       invalidate();
     }
 
     public void setBorderWidth(float width) {
       borderWidth = width;
-
       invalidate();
     }
 
@@ -694,176 +640,89 @@ public class FloatingEditText extends FrameLayout {
       super.onDraw(canvas);
 
       borderPaint.setColor(borderColor);
-
       borderPaint.setStrokeWidth(borderWidth);
 
-      borderPaint.setStyle(Paint.Style.STROKE);
-
       float half = borderWidth / 2f;
-
-      RectF rect = new RectF(half, dp(8) + half, getWidth() - half, dp(fieldHeight) + dp(8) - half);
-
-      /*
-       * --------------------------------------------------
-       * Normal outline
-       * --------------------------------------------------
-       */
+      rect.set(half, half, getWidth() - half, getHeight() - half);
+      float radius = dp(cornerRadius);
 
       if (labelProgress < 0.01f) {
-        canvas.drawRoundRect(rect, dp(cornerRadius), dp(cornerRadius), borderPaint);
-
+        canvas.drawRoundRect(rect, radius, radius, borderPaint);
         return;
       }
 
-      /*
-       * --------------------------------------------------
-       * Floating label notch
-       * --------------------------------------------------
-       *
-       * Draw the outline as four sections,
-       * leaving a gap where the label sits.
-       */
+      float labelLeft = label.getLeft();
+      float labelScaledWidth = label.getMeasuredWidth() * label.getScaleX();
 
-      float labelLeft = dp(10);
-
-      float labelWidth = label.getMeasuredWidth();
-
-      float gapLeft = labelLeft - dp(3);
-
-      float gapRight = labelLeft + labelWidth + dp(3);
-
-      /*
-       * Top-left section.
-       */
-
-      Path path = new Path();
-
-      path.moveTo(rect.left + dp(cornerRadius), rect.top);
-
-      path.lineTo(gapLeft, rect.top);
-
-      canvas.drawPath(path, borderPaint);
-
-      /*
-       * Top-right section.
-       */
+      float gapLeft = labelLeft - dp(4);
+      float gapRight = labelLeft + labelScaledWidth + dp(4);
 
       path.reset();
 
-      path.moveTo(gapRight, rect.top);
+      // Top-left segment before label gap
+      path.moveTo(rect.left + radius, rect.top);
+      path.lineTo(gapLeft, rect.top);
 
-      path.lineTo(rect.right - dp(cornerRadius), rect.top);
+      // Top-right segment after label gap
+      path.moveTo(gapRight, rect.top);
+      path.lineTo(rect.right - radius, rect.top);
+
+      // Remaining frame segments
+      path.moveTo(rect.left, rect.top + radius);
+      path.lineTo(rect.left, rect.bottom - radius);
+
+      path.moveTo(rect.left + radius, rect.bottom);
+      path.lineTo(rect.right - radius, rect.bottom);
+
+      path.moveTo(rect.right, rect.top + radius);
+      path.lineTo(rect.right, rect.bottom - radius);
+
+      // Corners
+      path.addArc(rect.left, rect.top, rect.left + radius * 2, rect.top + radius * 2, 180, 90);
+      path.addArc(rect.right - radius * 2, rect.top, rect.right, rect.top + radius * 2, 270, 90);
+      path.addArc(rect.left, rect.bottom - radius * 2, rect.left + radius * 2, rect.bottom, 90, 90);
+      path.addArc(rect.right - radius * 2, rect.bottom - radius * 2, rect.right, rect.bottom, 0, 90);
 
       canvas.drawPath(path, borderPaint);
-
-      /*
-       * Remaining rounded rectangle.
-       */
-
-      Path remaining = new Path();
-
-      RectF remainingRect = new RectF(rect.left, rect.top, rect.right, rect.bottom);
-
-      /*
-       * Draw left side.
-       */
-      canvas.drawLine(rect.left, rect.top + dp(cornerRadius), rect.left,
-          rect.bottom - dp(cornerRadius), borderPaint);
-
-      /*
-       * Draw bottom.
-       */
-      canvas.drawLine(rect.left + dp(cornerRadius), rect.bottom, rect.right - dp(cornerRadius),
-          rect.bottom, borderPaint);
-
-      /*
-       * Draw right.
-       */
-      canvas.drawLine(rect.right, rect.top + dp(cornerRadius), rect.right,
-          rect.bottom - dp(cornerRadius), borderPaint);
-
-      /*
-       * Rounded corners.
-       */
-
-      canvas.drawArc(new RectF(rect.left, rect.top, rect.left + dp(cornerRadius * 2),
-                         rect.top + dp(cornerRadius * 2)),
-          180, 90, false, borderPaint);
-
-      canvas.drawArc(new RectF(rect.right - dp(cornerRadius * 2), rect.top, rect.right,
-                         rect.top + dp(cornerRadius * 2)),
-          270, 90, false, borderPaint);
-
-      canvas.drawArc(new RectF(rect.left, rect.bottom - dp(cornerRadius * 2),
-                         rect.left + dp(cornerRadius * 2), rect.bottom),
-          90, 90, false, borderPaint);
-
-      canvas.drawArc(new RectF(rect.right - dp(cornerRadius * 2),
-                         rect.bottom - dp(cornerRadius * 2), rect.right, rect.bottom),
-          0, 90, false, borderPaint);
     }
   }
 
-  // Error icon
+  // --- Vector Drawables for Icons ---
+
   private static class ErrorIconDrawable extends Drawable {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
     private final Path path = new Path();
-
     private final int color;
 
     ErrorIconDrawable(int color) {
       this.color = color;
-
       paint.setStrokeCap(Paint.Cap.ROUND);
     }
 
     @Override
     public void draw(Canvas canvas) {
       RectF bounds = new RectF(getBounds());
-
       float cx = bounds.centerX();
-
       float cy = bounds.centerY();
-
-      float size = Math.min(bounds.width(), bounds.height()) * 0.55f;
-
+      float size = Math.min(bounds.width(), bounds.height()) * 0.50f;
       float radius = size * 0.5f;
 
-      /*
-       * Triangle.
-       */
-
       path.reset();
-
       path.moveTo(cx, cy - radius);
-
       path.lineTo(cx - radius, cy + radius);
-
       path.lineTo(cx + radius, cy + radius);
-
       path.close();
 
       paint.setStyle(Paint.Style.FILL);
-
       paint.setColor(color);
-
       canvas.drawPath(path, paint);
 
-      /*
-       * Exclamation mark.
-       */
-
       paint.setColor(Color.WHITE);
-
       paint.setStrokeWidth(size * 0.10f);
-
       paint.setStyle(Paint.Style.STROKE);
-
-      canvas.drawLine(cx, cy - size * 0.20f, cx, cy + size * 0.12f, paint);
+      canvas.drawLine(cx, cy - size * 0.18f, cx, cy + size * 0.12f, paint);
 
       paint.setStyle(Paint.Style.FILL);
-
       canvas.drawCircle(cx, cy + size * 0.28f, size * 0.055f, paint);
     }
 
@@ -871,12 +730,97 @@ public class FloatingEditText extends FrameLayout {
     public void setAlpha(int alpha) {
       paint.setAlpha(alpha);
     }
-
     @Override
     public void setColorFilter(android.graphics.ColorFilter filter) {
       paint.setColorFilter(filter);
     }
+    @Override
+    public int getOpacity() {
+      return android.graphics.PixelFormat.TRANSLUCENT;
+    }
+  }
 
+  private static class ClearIconDrawable extends Drawable {
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final int color;
+
+    ClearIconDrawable(int color) {
+      this.color = color;
+      paint.setStrokeCap(Paint.Cap.ROUND);
+      paint.setStyle(Paint.Style.STROKE);
+    }
+
+    @Override
+    public void draw(Canvas canvas) {
+      RectF bounds = new RectF(getBounds());
+      float cx = bounds.centerX();
+      float cy = bounds.centerY();
+      float radius = Math.min(bounds.width(), bounds.height()) * 0.22f;
+
+      paint.setColor(color);
+      paint.setStrokeWidth(radius * 0.35f);
+
+      canvas.drawLine(cx - radius, cy - radius, cx + radius, cy + radius, paint);
+      canvas.drawLine(cx + radius, cy - radius, cx - radius, cy + radius, paint);
+    }
+
+    @Override
+    public void setAlpha(int alpha) {
+      paint.setAlpha(alpha);
+    }
+    @Override
+    public void setColorFilter(android.graphics.ColorFilter filter) {
+      paint.setColorFilter(filter);
+    }
+    @Override
+    public int getOpacity() {
+      return android.graphics.PixelFormat.TRANSLUCENT;
+    }
+  }
+
+  private static class EyeIconDrawable extends Drawable {
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final int color;
+    private final boolean visible;
+
+    EyeIconDrawable(int color, boolean visible) {
+      this.color = color;
+      this.visible = visible;
+      paint.setStrokeCap(Paint.Cap.ROUND);
+    }
+
+    @Override
+    public void draw(Canvas canvas) {
+      RectF bounds = new RectF(getBounds());
+      float cx = bounds.centerX();
+      float cy = bounds.centerY();
+      float rx = Math.min(bounds.width(), bounds.height()) * 0.30f;
+      float ry = rx * 0.6f;
+
+      paint.setColor(color);
+      paint.setStyle(Paint.Style.STROKE);
+      paint.setStrokeWidth(rx * 0.2f);
+
+      RectF oval = new RectF(cx - rx, cy - ry, cx + rx, cy + ry);
+      canvas.drawOval(oval, paint);
+
+      paint.setStyle(Paint.Style.FILL);
+      canvas.drawCircle(cx, cy, ry * 0.5f, paint);
+
+      if (!visible) {
+        paint.setStyle(Paint.Style.STROKE);
+        canvas.drawLine(cx - rx, cy + ry, cx + rx, cy - ry, paint);
+      }
+    }
+
+    @Override
+    public void setAlpha(int alpha) {
+      paint.setAlpha(alpha);
+    }
+    @Override
+    public void setColorFilter(android.graphics.ColorFilter filter) {
+      paint.setColorFilter(filter);
+    }
     @Override
     public int getOpacity() {
       return android.graphics.PixelFormat.TRANSLUCENT;

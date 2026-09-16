@@ -12,6 +12,7 @@ TextWatcher = java.bindClass('android.text.TextWatcher')
 Runnable = java.bindClass('java.lang.Runnable')
 CodeEditor = java.bindClass('com.saynaa.CodeEditor')
 ArrayPageAdapter = java.bindClass('com.saynaa.adapter.ArrayPageAdapter')
+FloatingEditText = java.bindClass('com.saynaa.view.FloatingEditText')
 
 assert(LinearLayout != null, 'Failed to bind LinearLayout')
 assert(TextView != null, 'Failed to bind TextView')
@@ -138,8 +139,9 @@ status = TextView(activity)
 status.setText('Status: waiting...')
 status.setTextSize(16)
 
-input = EditText(activity)
+input = FloatingEditText(activity)
 input.setHint('Type to trigger TextWatcher')
+input.setLayoutParams(LinearLayout.LayoutParams(-1, -2))
 
 code = CodeEditor(activity)
 code.setText('function hello()\n  print("Hello, Saynaa!")\nend')
