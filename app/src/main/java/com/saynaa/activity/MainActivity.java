@@ -2,8 +2,7 @@ package com.saynaa.activity;
 
 import android.app.Activity;
 import android.os.Bundle;
-import com.saynaa.saynaajava.Main;
-import com.saynaa.saynaajava.Saynaa;
+import com.saynaa.runtime.Main;
 
 public class MainActivity extends SaynaaActivity {
   @Override

@@ -3,7 +3,7 @@ package com.saynaa.adapter;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
-import com.saynaa.saynaajava.datatype.SaynaaList;
+import com.saynaa.runtime.datatype.SaynaaList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
