@@ -104,7 +104,7 @@
       android:value="4.0"/>
 
     <provider
-      android:name="com.saynaa.DocumentProvider"
+      android:name="com.saynaa.provider.DocumentProvider"
       android:authorities="com.saynaa.documents"
       android:exported="true"
       android:grantUriPermissions="true"

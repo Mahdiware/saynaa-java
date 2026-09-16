@@ -1,4 +1,4 @@
-package com.saynaa.lang;
+package io.github.rosemoe.sora.custom.lang;
 
 import androidx.annotation.NonNull;
 import io.github.rosemoe.sora.lang.analysis.SimpleAnalyzeManager;

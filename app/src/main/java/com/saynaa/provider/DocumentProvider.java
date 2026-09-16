@@ -1,4 +1,4 @@
-package com.saynaa;
+package com.saynaa.provider;
 
 import android.content.pm.ApplicationInfo;
 import android.content.res.AssetFileDescriptor;

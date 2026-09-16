@@ -1,9 +1,9 @@
-package com.saynaa;
+package io.github.rosemoe.sora.custom;
 
 import android.content.Context;
 import android.graphics.Typeface;
 import android.util.AttributeSet;
-import com.saynaa.lang.SaynaaLanguage;
+import io.github.rosemoe.sora.custom.lang.SaynaaLanguage;
 import io.github.rosemoe.sora.widget.schemes.SchemeDarcula;
 import io.github.rosemoe.sora.widget.schemes.SchemeEclipse;
 
