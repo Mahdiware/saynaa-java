@@ -349,7 +349,6 @@ public class Saynaa {
   }
 
   public synchronized boolean bindJavaObject(int slot, Object value) {
-    Log.d("Saynaa", "Binding Java object to slot " + slot + ": " + value);
     return saynaa_bindJavaObject(slot, value);
   }
 

@@ -237,7 +237,7 @@ public final class JavaBridge {
     Method method = ReflectionFinder.findMethod(cls, methodName, normalized);
 
     if (method == null) {
-      logMethodMismatch(cls, methodName, normalized);
+      // logMethodMismatch(cls, methodName, normalized);
       return null;
     }
 
@@ -266,7 +266,7 @@ public final class JavaBridge {
     Method method = ReflectionFinder.findMethod(cls, methodName, normalized);
 
     if (method == null) {
-      logMethodMismatch(cls, methodName, normalized);
+      // logMethodMismatch(cls, methodName, normalized);
       return null;
     }
 
