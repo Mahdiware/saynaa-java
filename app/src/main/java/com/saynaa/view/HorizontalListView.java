@@ -262,6 +262,10 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
   private Drawable mSelectedBackground;
   private int mHeight;
 
+  private final Paint mTouchBoundPaint = new Paint();
+  private final Paint mSelectedPaint = new Paint();
+  private final Rect mSelectedRect = new Rect();
+
   public HorizontalListView(Context context) {
     this(context, null);
   }
@@ -377,6 +381,9 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
   }
 
   private void initView() {
+    mTouchBoundPaint.setColor(0x88888888);
+    mSelectedPaint.setColor(mSelectedColor);
+
     mLeftViewAdapterIndex = -1;
     mRightViewAdapterIndex = -1;
     mCurrentlySelectedAdapterIndex = -1;
@@ -384,6 +391,7 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
     mCurrentX = 0;
     mNextX = 0;
     mMaxX = Integer.MAX_VALUE;
+
     setCurrentScrollState(OnScrollStateChangedListener.ScrollState.SCROLL_STATE_IDLE);
   }
 
@@ -431,7 +439,7 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
   @Override
   public void setSelection(int position) {
     mCurrentlySelectedAdapterIndex = position;
-    if (mAdapter == null || position < 0 || position > mAdapter.getCount()) {
+    if (mAdapter == null || position < 0 || position >= mAdapter.getCount()) {
       invalidate();
       return;
     }
@@ -439,10 +447,9 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
     if (view == null || view.getRight() > getWidth() || view.getLeft() < 0) {
       int leftEdge = 0;
       View recycledView = null;
-      for (int i = 0; i < position - 1; i++) {
+      for (int i = 0; i < position; i++) {
         View child = mAdapter.getView(i, recycledView, this);
-        recycledView = child;
-        // If first view, then no divider to the left of it
+        recycledView = null;
         measureChild(child);
         leftEdge += i == 0 ? child.getMeasuredWidth() : mDividerWidth + child.getMeasuredWidth();
       }
@@ -469,9 +476,11 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
 
       mAdapter = adapter;
       mAdapter.registerDataSetObserver(mAdapterDataObserver);
+      initializeRecycledViewCache(mAdapter.getViewTypeCount());
+    } else {
+      mRemovedViewsCache.clear();
     }
 
-    initializeRecycledViewCache(mAdapter.getViewTypeCount());
     reset();
   }
 
@@ -526,7 +535,7 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
   }
 
   private boolean isItemViewTypeValid(int itemViewType) {
-    return itemViewType < mRemovedViewsCache.size();
+    return itemViewType >= 0 && itemViewType < mRemovedViewsCache.size();
   }
 
   /**
@@ -1083,36 +1092,41 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
   }
 
   private int dp(float n) {
-    return (int) TypedValue.applyDimension(1, n, dm);
+    return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, n, dm);
   }
 
   @Override
   protected void dispatchDraw(Canvas canvas) {
     if (mBound != null) {
-      Paint p = new Paint();
-      p.setColor(0x88888888);
-      canvas.drawRect(mBound, p);
+      canvas.drawRect(mBound, mTouchBoundPaint);
     }
+
     if (mCurrentlySelectedAdapterIndex >= 0 && mLeftViewAdapterIndex <= mCurrentlySelectedAdapterIndex
         && mRightViewAdapterIndex >= mCurrentlySelectedAdapterIndex && mSelectedBackground != null) {
       View child = getSelectedView();
+
       if (child != null) {
-        Rect bound = new Rect(child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
-        mSelectedBackground.setBounds(bound);
+        mSelectedRect.set(child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
+
+        mSelectedBackground.setBounds(mSelectedRect);
         mSelectedBackground.draw(canvas);
       }
     }
+
     super.dispatchDraw(canvas);
+
     if (mCurrentlySelectedAdapterIndex >= 0 && mLeftViewAdapterIndex <= mCurrentlySelectedAdapterIndex
         && mRightViewAdapterIndex >= mCurrentlySelectedAdapterIndex) {
       View child = getSelectedView();
+
       if (child != null) {
-        Rect bound = new Rect(child.getLeft(), child.getBottom() - dp(2), child.getRight(), child.getBottom());
-        Paint p = new Paint();
-        p.setColor(mSelectedColor);
-        canvas.drawRect(bound, p);
+        mSelectedRect.set(child.getLeft(), child.getBottom() - dp(2), child.getRight(), child.getBottom());
+
+        mSelectedPaint.setColor(mSelectedColor);
+        canvas.drawRect(mSelectedRect, mSelectedPaint);
       }
     }
+
     drawEdgeGlow(canvas);
   }
 
@@ -1430,12 +1444,15 @@ public class HorizontalListView extends AdapterView<ListAdapter> {
    * If it has changed and a listener is registered then it will be notified.
    */
   private void setCurrentScrollState(OnScrollStateChangedListener.ScrollState newScrollState) {
-    // If the state actually changed then notify listener if there is one
-    if (mCurrentScrollState != newScrollState && mOnScrollStateChangedListener != null) {
-      mOnScrollStateChangedListener.onScrollStateChanged(newScrollState);
+    if (mCurrentScrollState == newScrollState) {
+      return;
     }
 
     mCurrentScrollState = newScrollState;
+
+    if (mOnScrollStateChangedListener != null) {
+      mOnScrollStateChangedListener.onScrollStateChanged(newScrollState);
+    }
   }
 
   /**
