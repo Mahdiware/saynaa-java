@@ -111,15 +111,19 @@ public class SaynaaActivity extends Activity implements SaynaaBroadcastReceiver.
       Object[] launchArgs = null;
       Bundle launchBundle = null;
       Intent launchIntent = getIntent();
+      
       if (launchIntent != null) {
-        Object extra = launchIntent.getSerializableExtra(ARG);
-        if (extra instanceof Object[]) {
-          launchArgs = (Object[]) extra;
-        } else {
-          launchBundle = launchIntent.getBundleExtra(ARG);
+        Bundle extras = launchIntent.getExtras();
+        if (extras != null) {
+          Object value = extras.get(ARG);
+          if (value instanceof Object[]) {
+            launchArgs = (Object[]) value;
+          } else if (value instanceof Bundle) {
+            launchBundle = (Bundle) value;
+          }
         }
       }
-
+      
       if (launchArgs != null && launchArgs.length > 0) {
         runFunc("onCreate", launchArgs);
       } else if (launchBundle != null) {
