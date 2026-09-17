@@ -52,10 +52,9 @@ jobs:
         run: |
           set -eux
 
-          echo "Android SDK root:"
-          echo "$ANDROID_SDK_ROOT"
+          echo "Android SDK root: $ANDROID_SDK_ROOT"
 
-          # Find the built-in sdkmanager executable
+          # Find sdkmanager executable
           SDKMANAGER=""
           if [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
             SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
@@ -68,19 +67,24 @@ jobs:
             exit 1
           fi
 
-          echo "Using sdkmanager at: $SDKMANAGER"
-          "$SDKMANAGER" --version
-
           # Accept licenses first
           yes | "$SDKMANAGER" --licenses || true
 
-          # Install required components directly
+          # Direct download CMake to prevent sdkmanager ZipFile extraction failures
+          if [ ! -d "$ANDROID_SDK_ROOT/cmake/${CMAKE_VERSION}" ]; then
+            echo "Downloading CMake ${CMAKE_VERSION}..."
+            mkdir -p "$ANDROID_SDK_ROOT/cmake/${CMAKE_VERSION}"
+            curl -sSL --retry 5 "https://dl.google.com/android/repository/cmake-${CMAKE_VERSION}-linux.zip" -o /tmp/cmake.zip
+            unzip -q /tmp/cmake.zip -d "$ANDROID_SDK_ROOT/cmake/${CMAKE_VERSION}"
+            rm -f /tmp/cmake.zip
+          fi
+
+          # Install remaining SDK components & NDK via sdkmanager
           "$SDKMANAGER" \
             "platforms;android-${ANDROID_API}" \
             "build-tools;${BUILD_TOOLS_VERSION}" \
             "platform-tools" \
-            "ndk;${NDK_VERSION}" \
-            "cmake;${CMAKE_VERSION}"
+            "ndk;${NDK_VERSION}"
 
       # SHOW INSTALLED SDK
       - name: Show installed SDK/NDK
@@ -108,7 +112,7 @@ jobs:
 
           echo
           echo "CMake:"
-          ls -la "$ANDROID_SDK_ROOT/cmake" || true
+          ls -la "$ANDROID_SDK_ROOT/cmake/${CMAKE_VERSION}" || true
 
       # CLEAN
       - name: Clean project
